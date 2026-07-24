@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION.
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 set -euo pipefail
@@ -15,6 +15,11 @@ fi
 
 # Always build cuvs-java when running the pipeline
 EXTRA_BUILD_ARGS+=("--build-cuvs-java")
+
+# When RAPIDS_BRANCH points at a cuvs pull request that changes the C/C++ sources,
+# the libcuvs from the conda packages does not contain those changes, so build it
+# from source as well. Only done in CI, local builds keep using the conda packages.
+EXTRA_BUILD_ARGS+=("--build-libcuvs-if-changed")
 
 # shellcheck disable=SC1091
 . /opt/conda/etc/profile.d/conda.sh

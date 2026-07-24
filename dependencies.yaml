@@ -82,6 +82,7 @@ dependencies:
           - libcurand-dev
           - libcusolver-dev
           - libcusparse-dev
+          - libnvjitlink-dev
           - libcuvs==26.08.*
   java:
     common:

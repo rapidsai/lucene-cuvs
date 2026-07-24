@@ -18,6 +18,7 @@ dependencies:
 - libcusolver-dev
 - libcusparse-dev
 - libcuvs==26.08.*
+- libnvjitlink-dev
 - maven
 - ninja
 - openjdk=22.*
