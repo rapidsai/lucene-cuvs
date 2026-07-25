@@ -75,7 +75,6 @@ dependencies:
     common:
       - output_types: [conda]
         packages:
-          - cuda-nvrtc-dev
           - cuda-nvtx-dev
           - cuda-cudart-dev
           - cuda-profiler-api
@@ -83,7 +82,6 @@ dependencies:
           - libcurand-dev
           - libcusolver-dev
           - libcusparse-dev
-          - libnvjitlink-dev
           - libcuvs==26.08.*
   java:
     common:
