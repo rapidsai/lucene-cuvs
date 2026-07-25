@@ -40,7 +40,11 @@ if hasArg --build-cuvs-java; then
     CUDA_MAJOR="${RAPIDS_CUDA_VERSION%%.*}"
     LIBCUVS_ARTIFACT="cuvs_conda_cpp_libcuvs_$(arch)_cu${CUDA_MAJOR}"
     echo "Downloading libcuvs conda artifact '${LIBCUVS_ARTIFACT}' from cuvs PR #${PR_NUM}..."
-    LIBCUVS_CONDA_DIR=$(rapids-get-pr-artifact cuvs "$PR_NUM" cpp conda --override-artifact-name "$LIBCUVS_ARTIFACT")
+    CUVS_COMMIT=$(gh pr view "$PR_NUM" --repo rapidsai/cuvs --json headRefOid --jq '.headRefOid')
+    CUVS_RUN_ID=$(gh run list --repo rapidsai/cuvs --branch "pull-request/${PR_NUM}" --commit "$CUVS_COMMIT" \
+      --workflow pr.yaml --json 'createdAt,databaseId' --jq 'sort_by(.createdAt) | reverse | .[0] | .databaseId')
+    LIBCUVS_CONDA_DIR=$(mktemp -d)
+    gh run download "$CUVS_RUN_ID" --repo rapidsai/cuvs --name "$LIBCUVS_ARTIFACT" --dir "$LIBCUVS_CONDA_DIR"
     LIBCUVS_DIR=$(rapids-extract-conda-files "$LIBCUVS_CONDA_DIR")
     # The downloaded library has to take precedence over the one provided by the
     # conda packages, both here and while running the java tests.
