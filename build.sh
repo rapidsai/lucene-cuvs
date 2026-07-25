@@ -15,33 +15,6 @@ function hasArg {
     (( NUMARGS != 0 )) && (echo " ${ARGS} " | grep -q " $1 ")
 }
 
-# Checks whether the checked out cuvs branch modifies the C/C++ sources of libcuvs
-# with respect to the branch it is based on. Must be invoked from within the cuvs
-# clone.
-function cuvsModifiesCpp {
-  local base_ref merge_base
-
-  # The branch a pull request is based on cannot be derived from the pull request
-  # ref itself, so fall back on the release branch matching the cuvs version and,
-  # if that one does not exist yet, on the default branch of the repository.
-  base_ref="${CUVS_BASE_REF:-}"
-  if [[ -z "$base_ref" ]]; then
-    base_ref="release/$(sed -E 's/^([0-9]+)\.([0-9]+).*$/\1.\2/' VERSION)"
-    if ! git rev-parse --verify --quiet "origin/$base_ref" > /dev/null; then
-      base_ref=$(git symbolic-ref --short refs/remotes/origin/HEAD)
-      base_ref="${base_ref#origin/}"
-    fi
-  fi
-
-  if ! merge_base=$(git merge-base "origin/$base_ref" HEAD 2> /dev/null); then
-    echo "Could not determine the merge base with 'origin/$base_ref', assuming libcuvs was modified."
-    return 0
-  fi
-
-  echo "Comparing against 'origin/$base_ref' to detect changes in the cuvs C/C++ sources."
-  git diff --name-only "$merge_base" HEAD -- cpp/ \
-    | grep -qE '(\.(c|cc|cpp|cxx|cu|cuh|h|hpp|hxx|cmake)|CMakeLists\.txt)$'
-}
 
 if hasArg --build-cuvs-java; then
   CUVS_WORKDIR="cuvs-workdir"
@@ -59,16 +32,17 @@ if hasArg --build-cuvs-java; then
   fi
 
   # libcuvs comes from the conda packages, so normally only the java bindings have
-  # to be built. A pull request that changes the C/C++ sources is not part of those
-  # packages though, and the bindings would be built and tested against a stale
-  # library, so CI asks for libcuvs to be built from source in that case.
+  # to be built. For a pull request, the conda packages do not contain the PR's
+  # changes, so CI downloads the pre-built libcuvs artifact from the PR's own CI run.
   CUVS_BUILD_TARGETS=("java")
-  if hasArg --build-libcuvs-if-changed && [[ "$BRANCH" == pull-request/* ]] && cuvsModifiesCpp; then
-    echo "Branch '$BRANCH' modifies the cuvs C/C++ sources, building libcuvs from source as well."
-    CUVS_BUILD_TARGETS=("libcuvs" "${CUVS_BUILD_TARGETS[@]}")
-    # The libraries that were just built have to take precedence over the ones
-    # provided by the conda packages, both here and while running the java tests.
-    LD_LIBRARY_PATH="$PWD/cpp/build${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  if hasArg --use-pr-libcuvs && [[ "$BRANCH" == pull-request/* ]]; then
+    PR_NUM="${BRANCH#pull-request/}"
+    echo "Downloading libcuvs conda artifact from cuvs PR #${PR_NUM}..."
+    LIBCUVS_CONDA_DIR=$(rapids-get-pr-artifact cuvs "$PR_NUM" cpp conda)
+    LIBCUVS_DIR=$(rapids-extract-conda-files "$LIBCUVS_CONDA_DIR")
+    # The downloaded library has to take precedence over the one provided by the
+    # conda packages, both here and while running the java tests.
+    LD_LIBRARY_PATH="$LIBCUVS_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     export LD_LIBRARY_PATH
     echo "LD_LIBRARY_PATH is: $LD_LIBRARY_PATH"
   fi
