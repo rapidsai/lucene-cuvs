@@ -37,10 +37,8 @@ if hasArg --build-cuvs-java; then
   CUVS_BUILD_TARGETS=("java")
   if hasArg --use-pr-libcuvs && [[ "$BRANCH" == pull-request/* ]]; then
     PR_NUM="${BRANCH#pull-request/}"
-    CUDA_MAJOR="${RAPIDS_CUDA_VERSION%%.*}"
-    LIBCUVS_ARTIFACT="cuvs_conda_cpp_libcuvs_$(arch)_cu${CUDA_MAJOR}"
-    echo "Downloading libcuvs conda artifact '${LIBCUVS_ARTIFACT}' from cuvs PR #${PR_NUM}..."
-    LIBCUVS_CONDA_DIR=$(rapids-get-pr-artifact cuvs "$PR_NUM" cpp conda --override-artifact-name "$LIBCUVS_ARTIFACT")
+    echo "Downloading libcuvs conda artifact from cuvs PR #${PR_NUM}..."
+    LIBCUVS_CONDA_DIR=$(rapids-get-pr-artifact cuvs "$PR_NUM" cpp conda)
     LIBCUVS_DIR=$(rapids-extract-conda-files "$LIBCUVS_CONDA_DIR")
     # The downloaded library has to take precedence over the one provided by the
     # conda packages, both here and while running the java tests.
