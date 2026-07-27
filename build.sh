@@ -38,7 +38,7 @@ if hasArg --build-cuvs-java; then
   if hasArg --use-pr-libcuvs && [[ "$BRANCH" == pull-request/* ]]; then
     PR_NUM="${BRANCH#pull-request/}"
     echo "Downloading libcuvs conda artifact from cuvs PR #${PR_NUM}..."
-    LIBCUVS_CONDA_DIR=$(rapids-get-pr-artifact cuvs "$PR_NUM" cpp conda)
+    LIBCUVS_CONDA_DIR=$(rapids-get-pr-artifact NVIDIA/cuvs "$PR_NUM" cpp conda)
     LIBCUVS_DIR=$(rapids-extract-conda-files "$LIBCUVS_CONDA_DIR")
     # The downloaded library has to take precedence over the one provided by the
     # conda packages, both here and while running the java tests.
