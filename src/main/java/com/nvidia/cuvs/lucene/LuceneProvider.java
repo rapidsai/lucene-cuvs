@@ -112,6 +112,7 @@ public class LuceneProvider {
   }
 
   private LuceneProvider(String version) throws ClassNotFoundException {
+    // TODO: Find a better way if possible, but as a separate initiative.
     if (LUCENE_102_BINARY_FORMAT_VERSION.equals(version)) {
       binaryQuantizedVectorsFormat =
           loadClass(
