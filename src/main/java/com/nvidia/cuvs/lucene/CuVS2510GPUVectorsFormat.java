@@ -79,7 +79,7 @@ public class CuVS2510GPUVectorsFormat extends KnnVectorsFormat {
 
   @Override
   public String toString() {
-    return getName() + "(" + WriterTelemetry.forCagra() + ")";
+    return getName() + "(" + WriterTelemetry.forCagra(gpuSearchParams) + ")";
   }
 
   /**

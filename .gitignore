@@ -7,3 +7,5 @@ target
 bin
 .project
 cuvs-workdir
+__pycache__/
+.pytest_cache/

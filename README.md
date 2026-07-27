@@ -72,46 +72,89 @@ must be present separately on the JVM classpath. Do not use a native classifier
 libraries; the base jar uses native libraries from
 `LD_LIBRARY_PATH`/`java.library.path`.
 
-To run the PyLucene pytest smoke suite against a local PyLucene environment:
+#### PyLucene end-to-end tests
+
+Pytest cases are under `src/test/python`. The parametrized cases and assertions
+are in `test_pylucene_end_to_end.py`; reusable index and search code is in
+`pylucene_test_support.py`. The test-only Java adapters in
+`src/test/java/com/nvidia/cuvs/lucene/PyLuceneTestSupport.java` are compiled to
+`target/test-classes` and are not included in the published jar.
+
+`ci/run_pylucene_pytests.sh` builds the Maven artifacts when requested, resolves
+the PyLucene classpath inputs, and invokes pytest. `test_pylucene.sh` at the
+repository root is the convenient entry point.
+
+To build the artifacts and run the default CPU check in an activated PyLucene
+environment:
 
 ```sh
 ./test_pylucene.sh
 ```
 
-The script builds and validates the jar before invoking pytest. To invoke pytest
-directly against existing artifacts instead:
+The default runs the jar-packaging checks and
+`cpu-hnsw-single-document-index`. Use the groups below for broader coverage.
+Use `--no-build` when the standard jar and test bridge are already compiled.
+`CUVS_LUCENE_PYLUCENE_TEST_CLASSES` can point to a different test-classes
+directory and defaults to `target/test-classes`.
+
+Pytest can also be invoked directly once the PyLucene environment and classpath
+inputs are available:
 
 ```sh
-CUVS_LUCENE_JAR=/path/to/cuvs-lucene.jar \
-CUVS_LUCENE_CUVS_JAVA_JAR=/path/to/cuvs-java.jar \
-python3 -m pytest -q -s examples/Python/test_pylucene_smoke.py
+CUVS_LUCENE_JAR=/absolute/path/to/cuvs-lucene.jar \
+CUVS_LUCENE_CUVS_JAVA_JAR=/absolute/path/to/cuvs-java.jar \
+CUVS_LUCENE_PYLUCENE_TEST_CLASSES="$(pwd)/target/test-classes" \
+python3 -m pytest -q -s src/test/python/test_pylucene_end_to_end.py
 ```
 
-To run an expanded GPU end-to-end pytest suite through CPU HNSW,
-CAGRA-to-HNSW, and CAGRA search paths:
+The execution-path groups are:
+
+- `cpu-hnsw`: HNSW build and search through Lucene's CPU path.
+- `gpu-cagra-built-hnsw`: GPU CAGRA build followed by HNSW search.
+- `gpu-cagra-search`: GPU CAGRA build and search.
+
+GPU cases assert that cuVS was actually used and fail if it is unavailable or
+falls back to CPU. CPU cases assert and report the CPU path, and HNSW cases
+verify the persisted graph shape. CAGRA cases use `graphDegree=32` and
+`intermediateGraphDegree=64`.
+
+Vectors and queries are deterministic. Expected neighbors are computed with
+brute force. Queries for live indexed vectors check rank-one self matches,
+duplicate hits, and a configurable recall floor. Separate tests cover segment
+topology, force merges, HNSW layer count, CAGRA `searchWidth`, document filters,
+live documents without vectors, deleted documents, and searches after all but
+one document have been deleted. Set the recall floor with
+`--min-recall=FLOAT` in the wrapper or
+`CUVS_LUCENE_PYLUCENE_MIN_RECALL` for direct pytest execution.
+The default floor is `0.75`.
+
+Useful behavior groups include `execution-paths`, `segment-topologies`,
+`force-merges`, `hnsw-layer-counts`, `cagra-search-widths`,
+`documents-without-vectors`, `deleted-documents`,
+`all-but-one-document-deleted`, `single-document-index`, and
+`document-filter`.
+
+Run the complete CPU/GPU end-to-end suite with:
 
 ```sh
-./test_pylucene.sh --gpu-e2e
+./test_pylucene.sh --full-e2e
 ```
 
-The expanded suite runs the `gpu-basic`, `gpu-segments`, `cpu-hnsw`, and
-`cagra-hnsw` case groups. The basic cases cover `hnsw`, `cagra`, `hnsw-single`,
-and `cagra-single`. The segment cases cover 1-segment indexes, 10-segment
-indexes, 10 segments force-merged to 1, and 100 segments force-merged to 10 for
-both HNSW and CAGRA. The CPU HNSW cases force the accelerated HNSW codec through
-its Lucene CPU fallback path in the same run, including 10 segments force-merged
-to 1 and 100 segments force-merged to 10. The CAGRA-to-HNSW cases explicitly
-cover one-layer and three-layer HNSW graphs built from CAGRA with NN_DESCENT,
-`graphDegree=32`, and `intermediateGraphDegree=64`. The base matrix uses 2,000
-documents and 32 dimensions; high-segment cases use at least 257 rows per
-segment to avoid expected cuVS graph-degree clamps on tiny per-segment datasets.
-The suite checks Lucene SPI discovery, jar packaging, index file suffixes
-(`.vex`/`.vem` for HNSW and `.vcag`/`.vemc` for CAGRA), indexed vector metadata,
-unfiltered KNN, filtered KNN, missing-vector documents, deletions, and force
-merge behavior. To run a subset or resize the test:
+Select a focused group or set the minimum document count per scenario:
 
 ```sh
-./test_pylucene.sh --gpu-e2e --cases=gpu-segments --rows=5000 --dims=64 --topk=20
+./test_pylucene.sh --cases=cagra-search-widths \
+  --rows=5000 --dims=64 --topk=20 --min-recall=0.8
+```
+
+`--rows` is a lower bound. CAGRA cases use at least 97 vector-bearing
+documents per constructed graph, one more than cuVS's internal NN-Descent
+degree of 96. The three-layer HNSW case uses at least 24,832 vector-bearing
+documents so its third layer retains 97. Arguments after `--` are passed to
+pytest, for example:
+
+```sh
+./test_pylucene.sh --no-build --cases=gpu-cagra-search -- -x
 ```
 
 ### Running Tests

@@ -7,6 +7,7 @@ package com.nvidia.cuvs.lucene;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 
+import com.nvidia.cuvs.CagraIndexParams.CagraGraphBuildAlgo;
 import org.junit.Test;
 
 public class TestWriterTelemetry {
@@ -15,10 +16,24 @@ public class TestWriterTelemetry {
 
   @Test
   public void testCagraTelemetryIsComputedOnDemand() {
-    assertEquals("writerPath=gpu-cagra", WriterTelemetry.forCagra());
+    GPUSearchParams params =
+        new GPUSearchParams.Builder()
+            .withStrategy(GPUSearchParams.Strategy.CUSTOM)
+            .withCagraGraphBuildAlgo(CagraGraphBuildAlgo.NN_DESCENT)
+            .withGraphDegree(32)
+            .withIntermediateGraphDegree(64)
+            .build();
+
     assertEquals(
-        "CuVS2510GPUVectorsFormat(writerPath=gpu-cagra)",
-        new CuVS2510GPUVectorsFormat().toString());
+        "writerPath=gpu-cagra;cagraStrategy=CUSTOM;"
+            + "cagraGraphBuildAlgo=NN_DESCENT;cagraGraphDegree=32;"
+            + "cagraIntermediateGraphDegree=64",
+        WriterTelemetry.forCagra(params));
+    assertEquals(
+        "CuVS2510GPUVectorsFormat(writerPath=gpu-cagra;cagraStrategy=CUSTOM;"
+            + "cagraGraphBuildAlgo=NN_DESCENT;cagraGraphDegree=32;"
+            + "cagraIntermediateGraphDegree=64)",
+        new CuVS2510GPUVectorsFormat(params).toString());
     assertNull(System.getProperty("cuvs.lucene.lastCagraWriterPath"));
   }
 

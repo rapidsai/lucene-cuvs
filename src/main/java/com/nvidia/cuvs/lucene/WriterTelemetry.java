@@ -4,13 +4,21 @@
  */
 package com.nvidia.cuvs.lucene;
 
-/** Builds on-demand diagnostic snapshots for the PyLucene smoke suite. */
+/** Formats vector-writer configuration for diagnostic output. */
 final class WriterTelemetry {
 
   private WriterTelemetry() {}
 
-  static String forCagra() {
-    return "writerPath=gpu-cagra";
+  static String forCagra(GPUSearchParams params) {
+    return "writerPath=gpu-cagra"
+        + ";cagraStrategy="
+        + params.getStrategy().name()
+        + ";cagraGraphBuildAlgo="
+        + params.getCagraGraphBuildAlgo().name()
+        + ";cagraGraphDegree="
+        + params.getGraphdegree()
+        + ";cagraIntermediateGraphDegree="
+        + params.getIntermediateGraphDegree();
   }
 
   static String forHnsw(AcceleratedHNSWParams params) {
