@@ -10,7 +10,7 @@ import pytest
 
 CASE_MARKER = "pylucene_case"
 CASE_ENVIRONMENT_VARIABLE = "CUVS_LUCENE_PYLUCENE_CASES"
-DEFAULT_CASE_SELECTION = "cpu-hnsw-single-document-index"
+DEFAULT_CASE_SELECTION = "cpu-hnsw-1-segment"
 
 
 def pytest_configure(config: pytest.Config) -> None:

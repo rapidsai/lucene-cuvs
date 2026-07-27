@@ -71,9 +71,7 @@ while [[ "$#" -gt 0 ]]; do
       echo "Behavior groups:"
       echo "  execution-paths, segment-topologies, force-merges,"
       echo "  hnsw-layer-counts, cagra-search-widths,"
-      echo "  documents-without-vectors, deleted-documents,"
-      echo "  all-but-one-document-deleted, single-document-index,"
-      echo "  document-filter, all"
+      echo "  deleted-documents, document-filter, all"
       echo
       echo "Environment overrides:"
       echo "  CUVS_LUCENE_JAR, CUVS_LUCENE_CUVS_JAVA_JAR,"

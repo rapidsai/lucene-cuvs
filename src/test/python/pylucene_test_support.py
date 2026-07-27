@@ -60,7 +60,8 @@ class IndexScenario:
     document_ids_without_vectors: frozenset[int] = frozenset()
     document_ids_to_delete: frozenset[int] = frozenset()
     additional_query_document_ids: tuple[int, ...] = ()
-    document_id_excluded_by_filter: int = -1
+    document_ids_accepted_by_filter: frozenset[int] = frozenset()
+    filter_query_document_id: int | None = None
     force_cpu_hnsw: bool = False
     codec_factory_class: str = ""
     use_cagra_search_query: bool = False
@@ -435,7 +436,10 @@ def _validate_document_ids(scenario: IndexScenario) -> None:
         set(scenario.document_ids_without_vectors)
         | set(scenario.document_ids_to_delete)
         | set(scenario.additional_query_document_ids)
+        | set(scenario.document_ids_accepted_by_filter)
     )
+    if scenario.filter_query_document_id is not None:
+        referenced_document_ids.add(scenario.filter_query_document_id)
     invalid_document_ids = referenced_document_ids - valid_document_ids
     if invalid_document_ids:
         raise ValueError(
@@ -452,20 +456,32 @@ def _validate_document_ids(scenario: IndexScenario) -> None:
             f"{sorted(conflicting_document_ids)}"
         )
 
-    if (
-        scenario.document_id_excluded_by_filter >= 0
-        and scenario.document_id_excluded_by_filter not in valid_document_ids
-    ):
+    if scenario.filter_query_document_id is None:
+        if scenario.document_ids_accepted_by_filter:
+            raise ValueError(
+                f"{scenario.name}: accepted filter documents require a "
+                "filtered query"
+            )
+        return
+
+    if not scenario.document_ids_accepted_by_filter:
         raise ValueError(
-            f"{scenario.name}: filter-excluded document is outside the index: "
-            f"{scenario.document_id_excluded_by_filter}"
+            f"{scenario.name}: filtered query has no accepted documents"
         )
-    if scenario.document_id_excluded_by_filter in (
+    if scenario.filter_query_document_id in (
         scenario.document_ids_without_vectors | scenario.document_ids_to_delete
     ):
         raise ValueError(
-            f"{scenario.name}: filter-excluded document must have a live vector: "
-            f"{scenario.document_id_excluded_by_filter}"
+            f"{scenario.name}: filtered query document must have a live "
+            f"vector: {scenario.filter_query_document_id}"
+        )
+    if (
+        scenario.filter_query_document_id
+        in scenario.document_ids_accepted_by_filter
+    ):
+        raise ValueError(
+            f"{scenario.name}: filtered query document must be rejected by "
+            "the filter"
         )
 
 
@@ -496,23 +512,32 @@ def _query_document_state(
     return QueryDocumentState.SEARCHABLE
 
 
-def _effective_segment_count(scenario: IndexScenario) -> int:
-    return max(1, min(scenario.segment_count, scenario.document_count))
+def segment_document_id_ranges(
+    document_count: int, segment_count: int
+) -> tuple[range, ...]:
+    effective_segment_count = max(1, min(segment_count, document_count))
+    documents_per_segment, remainder = divmod(
+        document_count, effective_segment_count
+    )
+    ranges = []
+    start_document_id = 0
+    for segment_id in range(effective_segment_count):
+        documents_in_segment = documents_per_segment + (
+            1 if segment_id < remainder else 0
+        )
+        end_document_id = start_document_id + documents_in_segment
+        ranges.append(range(start_document_id, end_document_id))
+        start_document_id = end_document_id
+    return tuple(ranges)
 
 
 def _segment_end_document_ids(scenario: IndexScenario) -> set[int]:
-    segments = _effective_segment_count(scenario)
-    documents_per_segment, remainder = divmod(
-        scenario.document_count, segments
-    )
-    end_document_ids = set()
-    end_exclusive = 0
-    for segment_id in range(segments):
-        end_exclusive += documents_per_segment + (
-            1 if segment_id < remainder else 0
+    return {
+        document_ids.stop - 1
+        for document_ids in segment_document_id_ranges(
+            scenario.document_count, scenario.segment_count
         )
-        end_document_ids.add(end_exclusive - 1)
-    return end_document_ids
+    }
 
 
 def _segment_count(directory: Any) -> int:
@@ -629,11 +654,12 @@ def _write_index_and_apply_deletions(
                         VectorSimilarityFunction.EUCLIDEAN,
                     )
                 )
-            if scenario.document_id_excluded_by_filter >= 0:
+            if scenario.filter_query_document_id is not None:
                 filter_value = (
-                    FILTER_EXCLUDED_VALUE
-                    if document_id == scenario.document_id_excluded_by_filter
-                    else FILTER_INCLUDED_VALUE
+                    FILTER_INCLUDED_VALUE
+                    if document_id
+                    in scenario.document_ids_accepted_by_filter
+                    else FILTER_EXCLUDED_VALUE
                 )
                 document.add(
                     StringField(
@@ -767,6 +793,18 @@ def run_index_scenario(
         raise RuntimeError(
             f"{scenario.name}: no searchable vectors are available"
         )
+    filter_accepted_searchable_document_ids = tuple(
+        document_id
+        for document_id in searchable_vector_document_ids
+        if document_id in scenario.document_ids_accepted_by_filter
+    )
+    if (
+        scenario.filter_query_document_id is not None
+        and not filter_accepted_searchable_document_ids
+    ):
+        raise RuntimeError(
+            f"{scenario.name}: filter accepts no searchable vectors"
+        )
     representative_query_document_ids = _representative_query_document_ids(
         scenario, searchable_vector_document_ids
     )
@@ -834,10 +872,10 @@ def run_index_scenario(
                         stored_fields,
                         context,
                         scenario,
-                        scenario.document_id_excluded_by_filter,
-                        len(searchable_vector_document_ids) - 1,
+                        scenario.filter_query_document_id,
+                        len(filter_accepted_searchable_document_ids),
                     )
-                    if scenario.document_id_excluded_by_filter >= 0
+                    if scenario.filter_query_document_id is not None
                     else None
                 )
 

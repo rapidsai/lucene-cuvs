@@ -23,6 +23,7 @@ from pylucene_test_support import (
     find_cuvs_lucene_jar,
     initialize_pylucene_context,
     run_index_scenario,
+    segment_document_id_ranges,
 )
 
 # Python 3.14 reports one deprecation per JCC-generated PyLucene builtin type.
@@ -128,9 +129,7 @@ class ExecutionPath(Enum):
 
 class DocumentSetup(Enum):
     ALL_SEARCHABLE = "all-searchable"
-    ONE_WITHOUT_VECTOR = "one-without-vector"
     ONE_DELETED = "one-deleted"
-    ALL_BUT_ONE_DELETED = "all-but-one-deleted"
 
 
 @dataclass(frozen=True)
@@ -146,6 +145,12 @@ class DocumentConfiguration:
     document_ids_without_vectors: frozenset[int] = frozenset()
     document_ids_to_delete: frozenset[int] = frozenset()
     additional_query_document_ids: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class DocumentFilterConfiguration:
+    query_document_id: int | None = None
+    accepted_document_ids: frozenset[int] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -213,24 +218,49 @@ def _document_configuration(
     document_count: int, setup: DocumentSetup
 ) -> DocumentConfiguration:
     middle_document_id = document_count // 2
-    if setup is DocumentSetup.ONE_WITHOUT_VECTOR:
-        return DocumentConfiguration(
-            document_ids_without_vectors=frozenset({middle_document_id}),
-            additional_query_document_ids=(middle_document_id,),
-        )
     if setup is DocumentSetup.ONE_DELETED:
         return DocumentConfiguration(
             document_ids_to_delete=frozenset({middle_document_id}),
             additional_query_document_ids=(middle_document_id,),
         )
-    if setup is DocumentSetup.ALL_BUT_ONE_DELETED:
-        remaining_query_document_id = document_count - 1
-        deleted_document_ids = frozenset(range(remaining_query_document_id))
-        return DocumentConfiguration(
-            document_ids_to_delete=deleted_document_ids,
-            additional_query_document_ids=(0,),
-        )
     return DocumentConfiguration()
+
+
+def _minimum_document_count_for_selective_filter(
+    segment_count: int, top_k: int
+) -> int:
+    return segment_count * 4 * (top_k + 1)
+
+
+def _selective_document_filter_configuration(
+    document_count: int, segment_count: int, top_k: int
+) -> DocumentFilterConfiguration:
+    accepted_document_ids = set()
+    for segment_document_ids in segment_document_id_ranges(
+        document_count, segment_count
+    ):
+        accepted_document_count = max(
+            top_k + 1, len(segment_document_ids) // 4
+        )
+        first_accepted_document_id = (
+            segment_document_ids.stop - accepted_document_count
+        )
+        accepted_document_ids.update(
+            range(
+                first_accepted_document_id,
+                segment_document_ids.stop,
+            )
+        )
+
+    query_document_id = 0
+    if query_document_id in accepted_document_ids:
+        raise ValueError(
+            "selective filter must reject its query document"
+        )
+    return DocumentFilterConfiguration(
+        query_document_id=query_document_id,
+        accepted_document_ids=frozenset(accepted_document_ids),
+    )
 
 
 def _minimum_document_count(
@@ -248,12 +278,7 @@ def _minimum_document_count(
             segment_count * MIN_VECTORS_PER_CAGRA_BUILD
         )
 
-    if document_setup is DocumentSetup.ONE_WITHOUT_VECTOR:
-        required_document_count += 1
-    if document_setup in {
-        DocumentSetup.ONE_DELETED,
-        DocumentSetup.ALL_BUT_ONE_DELETED,
-    }:
+    if document_setup is DocumentSetup.ONE_DELETED:
         required_document_count = max(required_document_count, 2)
     return required_document_count
 
@@ -286,8 +311,7 @@ def _cpu_hnsw_case(
     segment_count: int = 1,
     force_merge_segment_count: int = 0,
     document_setup: DocumentSetup = DocumentSetup.ALL_SEARCHABLE,
-    single_document_index: bool = False,
-    filter_query: bool = False,
+    selective_filter: bool = False,
     groups: tuple[str, ...] = (),
     legacy_aliases: tuple[str, ...] = (),
 ) -> EndToEndCase:
@@ -298,29 +322,37 @@ def _cpu_hnsw_case(
         0,
         document_setup,
     )
-    if filter_query:
+    if selective_filter:
         minimum_document_count = max(
-            minimum_document_count, settings.top_k + 2
+            minimum_document_count,
+            _minimum_document_count_for_selective_filter(
+                segment_count, settings.top_k
+            ),
         )
-    document_count = (
-        1
-        if single_document_index
-        else max(settings.requested_document_count, minimum_document_count)
+    document_count = max(
+        settings.requested_document_count, minimum_document_count
     )
     documents = _document_configuration(document_count, document_setup)
-    document_id_excluded_by_filter = document_count // 2 if filter_query else -1
+    document_filter = (
+        _selective_document_filter_configuration(
+            document_count, segment_count, settings.top_k
+        )
+        if selective_filter
+        else DocumentFilterConfiguration()
+    )
     scenario = IndexScenario(
         name=selector,
         codec_name=HNSW_CODEC,
         document_count=document_count,
         dimensions=settings.dimensions,
-        top_k=1 if single_document_index else settings.top_k,
+        top_k=settings.top_k,
         segment_count=segment_count,
         force_merge_segment_count=force_merge_segment_count,
         document_ids_without_vectors=documents.document_ids_without_vectors,
         document_ids_to_delete=documents.document_ids_to_delete,
         additional_query_document_ids=documents.additional_query_document_ids,
-        document_id_excluded_by_filter=document_id_excluded_by_filter,
+        document_ids_accepted_by_filter=document_filter.accepted_document_ids,
+        filter_query_document_id=document_filter.query_document_id,
         force_cpu_hnsw=True,
         expected_hnsw_m=32,
     )
@@ -348,7 +380,7 @@ def _cagra_built_hnsw_case(
     segment_count: int = 1,
     force_merge_segment_count: int = 0,
     document_setup: DocumentSetup = DocumentSetup.ALL_SEARCHABLE,
-    filter_query: bool = False,
+    selective_filter: bool = False,
     groups: tuple[str, ...] = (),
     legacy_aliases: tuple[str, ...] = (),
 ) -> EndToEndCase:
@@ -359,14 +391,24 @@ def _cagra_built_hnsw_case(
         hnsw_layers,
         document_setup,
     )
-    if filter_query:
+    if selective_filter:
         minimum_document_count = max(
-            minimum_document_count, settings.top_k + 2
+            minimum_document_count,
+            _minimum_document_count_for_selective_filter(
+                segment_count, settings.top_k
+            ),
         )
     document_count = max(
         settings.requested_document_count, minimum_document_count
     )
     documents = _document_configuration(document_count, document_setup)
+    document_filter = (
+        _selective_document_filter_configuration(
+            document_count, segment_count, settings.top_k
+        )
+        if selective_filter
+        else DocumentFilterConfiguration()
+    )
     codec_name = (
         CAGRA_HNSW_MULTI_LAYER_CODEC
         if hnsw_layers == 3
@@ -377,19 +419,14 @@ def _cagra_built_hnsw_case(
         codec_name=codec_name,
         document_count=document_count,
         dimensions=settings.dimensions,
-        top_k=(
-            1
-            if document_setup is DocumentSetup.ALL_BUT_ONE_DELETED
-            else settings.top_k
-        ),
+        top_k=settings.top_k,
         segment_count=segment_count,
         force_merge_segment_count=force_merge_segment_count,
         document_ids_without_vectors=documents.document_ids_without_vectors,
         document_ids_to_delete=documents.document_ids_to_delete,
         additional_query_document_ids=documents.additional_query_document_ids,
-        document_id_excluded_by_filter=(
-            document_count // 2 if filter_query else -1
-        ),
+        document_ids_accepted_by_filter=document_filter.accepted_document_ids,
+        filter_query_document_id=document_filter.query_document_id,
         expected_hnsw_m=16,
     )
     return EndToEndCase(
@@ -417,7 +454,7 @@ def _cagra_search_case(
     force_merge_segment_count: int = 0,
     document_setup: DocumentSetup = DocumentSetup.ALL_SEARCHABLE,
     search_width: int = 1,
-    filter_query: bool = False,
+    selective_filter: bool = False,
     groups: tuple[str, ...] = (),
     legacy_aliases: tuple[str, ...] = (),
 ) -> EndToEndCase:
@@ -433,33 +470,38 @@ def _cagra_search_case(
         0,
         document_setup,
     )
-    if filter_query:
+    if selective_filter:
         minimum_document_count = max(
-            minimum_document_count, settings.top_k + 2
+            minimum_document_count,
+            _minimum_document_count_for_selective_filter(
+                segment_count, settings.top_k
+            ),
         )
     document_count = max(
         settings.requested_document_count, minimum_document_count
     )
     documents = _document_configuration(document_count, document_setup)
+    document_filter = (
+        _selective_document_filter_configuration(
+            document_count, segment_count, settings.top_k
+        )
+        if selective_filter
+        else DocumentFilterConfiguration()
+    )
     scenario = IndexScenario(
         name=selector,
         codec_name=CAGRA_CODEC,
         codec_factory_class=CAGRA_TEST_CODEC_CLASS,
         document_count=document_count,
         dimensions=settings.dimensions,
-        top_k=(
-            1
-            if document_setup is DocumentSetup.ALL_BUT_ONE_DELETED
-            else settings.top_k
-        ),
+        top_k=settings.top_k,
         segment_count=segment_count,
         force_merge_segment_count=force_merge_segment_count,
         document_ids_without_vectors=documents.document_ids_without_vectors,
         document_ids_to_delete=documents.document_ids_to_delete,
         additional_query_document_ids=documents.additional_query_document_ids,
-        document_id_excluded_by_filter=(
-            document_count // 2 if filter_query else -1
-        ),
+        document_ids_accepted_by_filter=document_filter.accepted_document_ids,
+        filter_query_document_id=document_filter.query_document_id,
         use_cagra_search_query=True,
         search_width=search_width,
         i_top_k=max(64, settings.top_k),
@@ -489,7 +531,7 @@ SEGMENT_CASES = (
             "algorithm-matrix",
             "segment-topologies",
         ),
-        legacy_aliases=("hnsw-cpu", "hnsw-cpu-1seg"),
+        legacy_aliases=("smoke", "hnsw-cpu", "hnsw-cpu-1seg"),
     ),
     _cpu_hnsw_case(
         "cpu-hnsw-10-segments",
@@ -505,8 +547,14 @@ SEGMENT_CASES = (
             "execution-paths",
             "algorithm-matrix",
             "segment-topologies",
+            "hnsw-layer-counts",
         ),
-        legacy_aliases=("hnsw-1seg",),
+        legacy_aliases=(
+            "hnsw-1seg",
+            "cagra-hnsw-1layer",
+            "cagra-hnsw-base",
+            "cagra-hnsw-base-layer",
+        ),
     ),
     _cagra_built_hnsw_case(
         "gpu-cagra-built-hnsw-10-segments",
@@ -514,16 +562,6 @@ SEGMENT_CASES = (
         segment_count=10,
         groups=("segment-topologies",),
         legacy_aliases=("hnsw-10seg",),
-    ),
-    _cagra_search_case(
-        "gpu-cagra-search-1-segment",
-        "gpu-cagra-search-1-segment",
-        groups=(
-            "execution-paths",
-            "algorithm-matrix",
-            "segment-topologies",
-        ),
-        legacy_aliases=("cagra-1seg",),
     ),
     _cagra_search_case(
         "gpu-cagra-search-10-segments",
@@ -587,16 +625,6 @@ FORCE_MERGE_CASES = (
 
 HNSW_LAYER_CASES = (
     _cagra_built_hnsw_case(
-        "gpu-cagra-built-hnsw-1-layer",
-        "1-layer",
-        groups=("hnsw-layer-counts",),
-        legacy_aliases=(
-            "cagra-hnsw-1layer",
-            "cagra-hnsw-base",
-            "cagra-hnsw-base-layer",
-        ),
-    ),
-    _cagra_built_hnsw_case(
         "gpu-cagra-built-hnsw-3-layers",
         "3-layers",
         hnsw_layers=3,
@@ -611,6 +639,20 @@ HNSW_LAYER_CASES = (
 
 CAGRA_SEARCH_WIDTH_CASES = (
     _cagra_search_case(
+        "gpu-cagra-search-width-1",
+        "1",
+        groups=(
+            "execution-paths",
+            "algorithm-matrix",
+            "segment-topologies",
+            "cagra-search-widths",
+        ),
+        legacy_aliases=(
+            "gpu-cagra-search-1-segment",
+            "cagra-1seg",
+        ),
+    ),
+    _cagra_search_case(
         "gpu-cagra-search-width-16",
         "16",
         search_width=16,
@@ -624,40 +666,7 @@ CAGRA_SEARCH_WIDTH_CASES = (
     ),
 )
 
-DOCUMENTS_WITHOUT_VECTORS_CASES = (
-    _cpu_hnsw_case(
-        "cpu-hnsw-documents-without-vectors",
-        "cpu-hnsw",
-        document_setup=DocumentSetup.ONE_WITHOUT_VECTOR,
-        groups=("documents-without-vectors",),
-    ),
-    _cagra_built_hnsw_case(
-        "gpu-cagra-built-hnsw-documents-without-vectors",
-        "gpu-cagra-built-hnsw",
-        document_setup=DocumentSetup.ONE_WITHOUT_VECTOR,
-        groups=("documents-without-vectors",),
-    ),
-    _cagra_search_case(
-        "gpu-cagra-search-documents-without-vectors",
-        "gpu-cagra-search",
-        document_setup=DocumentSetup.ONE_WITHOUT_VECTOR,
-        groups=("documents-without-vectors",),
-    ),
-)
-
 DELETED_DOCUMENT_CASES = (
-    _cpu_hnsw_case(
-        "cpu-hnsw-deleted-documents",
-        "cpu-hnsw",
-        document_setup=DocumentSetup.ONE_DELETED,
-        groups=("deleted-documents",),
-    ),
-    _cagra_built_hnsw_case(
-        "gpu-cagra-built-hnsw-deleted-documents",
-        "gpu-cagra-built-hnsw",
-        document_setup=DocumentSetup.ONE_DELETED,
-        groups=("deleted-documents",),
-    ),
     _cagra_search_case(
         "gpu-cagra-search-deleted-documents",
         "gpu-cagra-search",
@@ -666,49 +675,28 @@ DELETED_DOCUMENT_CASES = (
     ),
 )
 
-ALL_BUT_ONE_DOCUMENT_DELETED_CASES = (
-    _cagra_built_hnsw_case(
-        "gpu-cagra-built-hnsw-all-but-one-document-deleted",
-        "gpu-cagra-built-hnsw",
-        document_setup=DocumentSetup.ALL_BUT_ONE_DELETED,
-        groups=("all-but-one-document-deleted",),
-    ),
-    _cagra_search_case(
-        "gpu-cagra-search-all-but-one-document-deleted",
-        "gpu-cagra-search",
-        document_setup=DocumentSetup.ALL_BUT_ONE_DELETED,
-        groups=("all-but-one-document-deleted",),
-    ),
-)
-
-SINGLE_DOCUMENT_INDEX_CASES = (
-    _cpu_hnsw_case(
-        "cpu-hnsw-single-document-index",
-        "cpu-hnsw",
-        single_document_index=True,
-        groups=("single-document-index",),
-        legacy_aliases=("smoke", "hnsw-cpu-single", "single-hnsw-cpu"),
-    ),
-)
-
 DOCUMENT_FILTER_CASES = (
     _cpu_hnsw_case(
-        "cpu-hnsw-document-filter",
-        "cpu-hnsw",
-        filter_query=True,
+        "cpu-hnsw-selective-filter",
+        "cpu-hnsw-selective-filter",
+        selective_filter=True,
         groups=("document-filter",),
+        legacy_aliases=("cpu-hnsw-document-filter",),
     ),
     _cagra_built_hnsw_case(
-        "gpu-cagra-built-hnsw-document-filter",
-        "gpu-cagra-built-hnsw",
-        filter_query=True,
+        "gpu-cagra-built-hnsw-selective-filter",
+        "gpu-cagra-built-hnsw-selective-filter",
+        selective_filter=True,
         groups=("document-filter",),
+        legacy_aliases=("gpu-cagra-built-hnsw-document-filter",),
     ),
     _cagra_search_case(
-        "gpu-cagra-search-document-filter",
-        "gpu-cagra-search",
-        filter_query=True,
+        "gpu-cagra-search-selective-filter-10-segments",
+        "gpu-cagra-search-selective-filter-10-segments",
+        segment_count=10,
+        selective_filter=True,
         groups=("document-filter",),
+        legacy_aliases=("gpu-cagra-search-document-filter",),
     ),
 )
 
@@ -842,13 +830,21 @@ def _squared_distance(
 
 
 def _brute_force_neighbor_ids(
-    case: EndToEndCase, result: IndexRun, query_document_id: int
+    case: EndToEndCase,
+    result: IndexRun,
+    query_document_id: int,
+    candidate_document_ids: tuple[int, ...] | None = None,
 ) -> tuple[str, ...]:
     query_vector = deterministic_float32_vector(
         query_document_id, case.scenario.dimensions
     )
+    candidates = (
+        result.searchable_vector_document_ids
+        if candidate_document_ids is None
+        else candidate_document_ids
+    )
     ordered_ids = sorted(
-        result.searchable_vector_document_ids,
+        candidates,
         key=lambda document_id: (
             _squared_distance(
                 query_vector,
@@ -1146,22 +1142,6 @@ def test_cagra_search_with_configured_search_width(
 
 
 @pytest.mark.parametrize(
-    "case", _case_parameters(DOCUMENTS_WITHOUT_VECTORS_CASES)
-)
-def test_live_documents_without_vectors_are_not_searchable(
-    pylucene_context: PyLuceneContext, case: EndToEndCase
-) -> None:
-    result, _ = _run_and_verify(case, pylucene_context)
-    assert len(result.document_ids_without_vectors) == 1
-    assert not result.deleted_document_ids
-    assert any(
-        observation.query_document_state
-        is QueryDocumentState.WITHOUT_VECTOR
-        for observation in result.query_observations
-    )
-
-
-@pytest.mark.parametrize(
     "case", _case_parameters(DELETED_DOCUMENT_CASES)
 )
 def test_deleted_documents_are_not_searchable(
@@ -1177,61 +1157,89 @@ def test_deleted_documents_are_not_searchable(
 
 
 @pytest.mark.parametrize(
-    "case", _case_parameters(ALL_BUT_ONE_DOCUMENT_DELETED_CASES)
-)
-def test_search_after_deleting_all_but_one_document(
-    pylucene_context: PyLuceneContext, case: EndToEndCase
-) -> None:
-    result, _ = _run_and_verify(case, pylucene_context)
-    assert result.live_document_count == 1
-    assert len(result.searchable_vector_document_ids) == 1
-    remaining_document = f"doc-{result.searchable_vector_document_ids[0]}"
-    searchable_observations = [
-        observation
-        for observation in result.query_observations
-        if (
-            observation.query_document_state
-            is QueryDocumentState.SEARCHABLE
-        )
-    ]
-    assert searchable_observations
-    assert all(
-        observation.hit_ids == (remaining_document,)
-        for observation in searchable_observations
-    )
-
-
-@pytest.mark.parametrize(
-    "case", _case_parameters(SINGLE_DOCUMENT_INDEX_CASES)
-)
-def test_single_document_index_is_searchable(
-    pylucene_context: PyLuceneContext, case: EndToEndCase
-) -> None:
-    result, _ = _run_and_verify(case, pylucene_context)
-    assert result.live_document_count == 1
-    assert result.vector_count == 1
-    assert result.query_observations[0].hit_ids == ("doc-0",)
-
-
-@pytest.mark.parametrize(
     "case", _case_parameters(DOCUMENT_FILTER_CASES)
 )
-def test_vector_search_excludes_document_rejected_by_filter(
+def test_vector_search_honors_selective_document_filter(
     pylucene_context: PyLuceneContext, case: EndToEndCase
 ) -> None:
     result, _ = _run_and_verify(case, pylucene_context)
     observation = result.filtered_query_observation
     assert observation is not None
 
-    excluded_document = (
-        f"doc-{case.scenario.document_id_excluded_by_filter}"
+    accepted_document_ids = tuple(
+        document_id
+        for document_id in result.searchable_vector_document_ids
+        if document_id in case.scenario.document_ids_accepted_by_filter
     )
-    assert observation.query_document_id == (
-        case.scenario.document_id_excluded_by_filter
+    accepted_document_id_set = set(accepted_document_ids)
+    accepted_hit_ids = {
+        f"doc-{document_id}" for document_id in accepted_document_ids
+    }
+    accepted_counts_by_segment = tuple(
+        sum(
+            document_id in accepted_document_id_set
+            for document_id in segment_document_ids
+        )
+        for segment_document_ids in segment_document_id_ranges(
+            case.scenario.document_count,
+            case.scenario.segment_count,
+        )
     )
-    assert excluded_document not in observation.hit_ids
-    assert len(observation.hit_ids) == min(
+    query_document_id = case.scenario.filter_query_document_id
+    assert query_document_id is not None
+    queried_document = f"doc-{query_document_id}"
+
+    assert observation.query_document_id == query_document_id
+    assert query_document_id not in (
+        case.scenario.document_ids_accepted_by_filter
+    )
+    assert queried_document not in observation.hit_ids
+    assert min(accepted_counts_by_segment) > case.scenario.top_k, (
+        f"{case.selector}: every segment must retain more than topK="
+        f"{case.scenario.top_k} accepted vectors; "
+        f"acceptedPerSegment={accepted_counts_by_segment}"
+    )
+
+    rejected_hit_ids = tuple(
+        hit_id
+        for hit_id in observation.hit_ids
+        if hit_id not in accepted_hit_ids
+    )
+    assert not rejected_hit_ids, (
+        f"{case.selector}: filter-rejected documents were returned: "
+        f"{rejected_hit_ids}"
+    )
+    expected_hit_count = min(
         case.scenario.top_k,
-        len(result.searchable_vector_document_ids) - 1,
+        len(accepted_document_ids),
     )
-    assert len(observation.hit_ids) == len(set(observation.hit_ids))
+    assert len(observation.hit_ids) == expected_hit_count, (
+        f"{case.selector}: expected {expected_hit_count} filtered hits, "
+        f"got {observation.hit_ids}"
+    )
+    assert len(observation.hit_ids) == len(set(observation.hit_ids)), (
+        f"{case.selector}: duplicate filtered hits returned: "
+        f"{observation.hit_ids}"
+    )
+
+    expected_neighbors = _brute_force_neighbor_ids(
+        case,
+        result,
+        query_document_id,
+        accepted_document_ids,
+    )
+    recall = (
+        len(set(observation.hit_ids) & set(expected_neighbors))
+        / len(expected_neighbors)
+    )
+    assert recall >= case.min_recall, (
+        f"{case.selector}: filtered query {queried_document} recall "
+        f"{recall:.3f} is below floor {case.min_recall:.3f}; "
+        f"expected={expected_neighbors}, actual={observation.hit_ids}"
+    )
+    print(
+        f"FILTER [{case.execution_path.label}] {case.selector}: "
+        f"acceptedPerSegment={min(accepted_counts_by_segment)}-"
+        f"{max(accepted_counts_by_segment)}, "
+        f"recall={recall:.3f}"
+    )

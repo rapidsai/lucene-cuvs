@@ -175,8 +175,8 @@ environment:
 ./test_pylucene.sh
 ```
 
-The default runs the jar-packaging checks and
-`cpu-hnsw-single-document-index`. Use the groups below for broader coverage.
+The default runs the jar-packaging checks and `cpu-hnsw-1-segment`. Use the
+groups below for broader coverage.
 Use `--no-build` when the standard jar and test bridge are already compiled.
 `CUVS_LUCENE_PYLUCENE_TEST_CLASSES` can point to a different test-classes
 directory and defaults to `target/test-classes`.
@@ -205,18 +205,22 @@ verify the persisted graph shape. CAGRA cases use `graphDegree=32` and
 Vectors and queries are deterministic. Expected neighbors are computed with
 brute force. Queries for live indexed vectors check rank-one self matches,
 duplicate hits, and a configurable recall floor. Separate tests cover segment
-topology, force merges, HNSW layer count, CAGRA `searchWidth`, document filters,
-live documents without vectors, deleted documents, and searches after all but
-one document have been deleted. Set the recall floor with
-`--min-recall=FLOAT` in the wrapper or
-`CUVS_LUCENE_PYLUCENE_MIN_RECALL` for direct pytest execution.
+topology, force merges, HNSW layer count, CAGRA `searchWidth` values 1, 16, and
+32, and document filters. A dedicated CAGRA-search case verifies that a deleted
+document is not returned. Set the recall floor with `--min-recall=FLOAT` in the
+wrapper or `CUVS_LUCENE_PYLUCENE_MIN_RECALL` for direct pytest execution.
 The default floor is `0.75`.
+
+The `document-filter` group exercises selective filters through CPU HNSW,
+CAGRA-built HNSW, and CAGRA search. The CAGRA-search case uses ten segments
+and accepts roughly one quarter of each segment. Every segment retains more
+than `topK` accepted vectors so Lucene exercises approximate native
+prefiltering; results are checked against brute-force neighbors from only the
+accepted vectors.
 
 Useful behavior groups include `execution-paths`, `segment-topologies`,
 `force-merges`, `hnsw-layer-counts`, `cagra-search-widths`,
-`documents-without-vectors`, `deleted-documents`,
-`all-but-one-document-deleted`, `single-document-index`, and
-`document-filter`.
+`deleted-documents`, and `document-filter`.
 
 Run the complete CPU/GPU end-to-end suite with:
 
