@@ -45,6 +45,13 @@ if hasArg --build-cuvs-java; then
     LD_LIBRARY_PATH="$LIBCUVS_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     export LD_LIBRARY_PATH
     echo "LD_LIBRARY_PATH is: $LD_LIBRARY_PATH"
+    # Point cmake to the PR artifact so find_package(cuvs) picks up its headers
+    # instead of the conda-installed ones, ensuring jextract generates correct
+    # Panama bindings for any new C API in the PR.
+    export CMAKE_PREFIX_PATH="$LIBCUVS_DIR"
+    # Uninstall the conda-installed libcuvs so it cannot shadow the PR artifact
+    # at runtime.
+    conda remove --yes --force-remove libcuvs
   fi
   ./build.sh "${CUVS_BUILD_TARGETS[@]}"
   popd
