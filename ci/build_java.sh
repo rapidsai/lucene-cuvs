@@ -65,6 +65,13 @@ fi
 # PR's changes, so download the pre-built libcuvs artifact from the PR's own CI run.
 BRANCH=$(cat "RAPIDS_BRANCH")
 if [[ "$BRANCH" == pull-request/* ]]; then
+  rapids-logger "Remove libcuvs from conda environment"
+  # Uninstall the conda libcuvs so the JVM's RPATH (which points to the conda
+  # env's lib dir) cannot find the old libcuvs_c.so ahead of the PR artifact.
+  set +u
+  conda remove --yes --force-remove libcuvs
+  set -u
+  # Download PR artifact
   PR_NUM="${BRANCH#pull-request/}"
   rapids-logger "Downloading libcuvs conda artifact from cuvs PR #${PR_NUM}"
   LIBCUVS_CONDA_DIR=$(rapids-get-pr-artifact NVIDIA/cuvs "$PR_NUM" cpp conda)
@@ -73,9 +80,6 @@ if [[ "$BRANCH" == pull-request/* ]]; then
   # at runtime and for cmake's find_package (to pick up new C API headers for jextract).
   export LD_LIBRARY_PATH="$LIBCUVS_ARTIFACT_DIR/lib:$LD_LIBRARY_PATH"
   export cuvs_ROOT="$LIBCUVS_ARTIFACT_DIR"
-  # Uninstall the conda libcuvs so the JVM's RPATH (which points to the conda
-  # env's lib dir) cannot find the old libcuvs_c.so ahead of the PR artifact.
-  conda remove --yes --force-remove libcuvs
 fi
 
 rapids-logger "Run Java build"
