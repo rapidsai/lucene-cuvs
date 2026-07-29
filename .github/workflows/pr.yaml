@@ -59,9 +59,20 @@ jobs:
       files_yaml: |
         test_java:
           - '**'
+          - '!.github/CODEOWNERS'
+          - '!.github/build.yaml'
+          - '!.github/copy-pr-bot.yaml'
+          - '!.github/ops-bot.yaml'
+          - '!.github/release.yml'
+          - '!.gihtub/test.yaml'
+          - '!.github/zizmor.yml'
+          - '!.gitignore'
           - '!.pre-commit-config.yaml'
+          - '!.yamllint.yaml'
           - '!README.md'
           - '!SECURITY.md'
+          - '!ci/check_style.sh'
+          - '!ci/release/update-version.sh'
     permissions:
       actions: read
       contents: read

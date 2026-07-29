@@ -11,6 +11,7 @@ LICENSE                  @NVIDIA/cuvs-docs-codeowners
 
 # CI code owners
 /.github/                @NVIDIA/adi-ci-codeowners
+/.yamllint.yaml          @NVIDIA/adi-ci-codeowners
 /ci/                     @NVIDIA/adi-ci-codeowners
 
 # packaging code owners
