@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 package com.nvidia.cuvs.lucene;
@@ -128,6 +128,16 @@ class FilterCuVSProvider implements CuVSProvider {
   public CagraIndexParams cagraIndexParamsFromHnswParams(
       long arg0, long arg1, int arg2, int arg3, HnswHeuristicType arg4, CuvsDistanceType arg5) {
     return delegate.cagraIndexParamsFromHnswParams(arg0, arg1, arg2, arg3, arg4, arg5);
+  }
+
+  @Override
+  public CagraIndexParams cagraIndexParamsFromDataset(
+      long rows,
+      long dim,
+      long graphDegree,
+      CuvsDistanceType metric,
+      long buildQuality) {
+    return delegate.cagraIndexParamsFromDataset(rows, dim, graphDegree, metric, buildQuality);
   }
 
   @Override
