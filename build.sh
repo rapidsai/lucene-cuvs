@@ -31,22 +31,7 @@ if hasArg --build-cuvs-java; then
     pushd $CUVS_WORKDIR
   fi
 
-  # libcuvs comes from the conda packages, so normally only the java bindings have
-  # to be built. For a pull request, the conda packages do not contain the PR's
-  # changes, so CI downloads the pre-built libcuvs artifact from the PR's own CI run.
-  CUVS_BUILD_TARGETS=("java")
-  if hasArg --use-pr-libcuvs && [[ "$BRANCH" == pull-request/* ]]; then
-    PR_NUM="${BRANCH#pull-request/}"
-    echo "Downloading libcuvs conda artifact from cuvs PR #${PR_NUM}..."
-    LIBCUVS_CONDA_DIR=$(rapids-get-pr-artifact NVIDIA/cuvs "$PR_NUM" cpp conda)
-    LIBCUVS_DIR=$(rapids-extract-conda-files "$LIBCUVS_CONDA_DIR")
-    # The downloaded library has to take precedence over the one provided by the
-    # conda packages, both here and while running the java tests.
-    LD_LIBRARY_PATH="$LIBCUVS_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    export LD_LIBRARY_PATH
-    echo "LD_LIBRARY_PATH is: $LD_LIBRARY_PATH"
-  fi
-  ./build.sh "${CUVS_BUILD_TARGETS[@]}"
+  ./build.sh java
   popd
 fi
 
