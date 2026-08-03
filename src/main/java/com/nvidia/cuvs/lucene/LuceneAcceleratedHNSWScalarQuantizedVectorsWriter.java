@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 package com.nvidia.cuvs.lucene;
@@ -209,7 +209,6 @@ public class LuceneAcceleratedHNSWScalarQuantizedVectorsWriter extends KnnVector
               adjacencyListMatrix,
               unsignedVectors,
               acceleratedHNSWParams.getHnswLayers(),
-              acceleratedHNSWParams.getGraphdegree(),
               params,
               QuantizationType.SCALAR);
 
@@ -229,8 +228,7 @@ public class LuceneAcceleratedHNSWScalarQuantizedVectorsWriter extends KnnVector
           vectorIndexLength,
           size,
           hnswGraph,
-          graphLevelNodeOffsets,
-          acceleratedHNSWParams.getGraphdegree());
+          graphLevelNodeOffsets);
 
       cagraIndex.close();
     } catch (Throwable t) {
@@ -316,8 +314,7 @@ public class LuceneAcceleratedHNSWScalarQuantizedVectorsWriter extends KnnVector
           vectorIndexLength,
           size,
           hnswGraph,
-          graphLevelNodeOffsets,
-          acceleratedHNSWParams.getGraphdegree());
+          graphLevelNodeOffsets);
 
     } catch (Throwable t) {
       Utils.handleThrowable(t);

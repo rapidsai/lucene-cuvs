@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -74,7 +74,8 @@ public class AcceleratedHNSWUtils {
 
   /**
    * Creates a multi-layer HNSW graph with dynamic number of layers.
-   * M = cagraGraphDegree/2
+   * M = ceil(cagraGraphDegree / 2), where cagraGraphDegree is the CAGRA adjacency list's degree
+   * (its column count). Ceil is used to accommodate odd graph degrees.
    * Each layer contains 1/M nodes from the previous layer
    * Creates layers until the highest layer has ≤ M nodes
    */
@@ -85,13 +86,11 @@ public class AcceleratedHNSWUtils {
       CuVSMatrix adjacencyListMatrix,
       List<?> vectors,
       int hnswLayers,
-      int graphDegree,
       CagraIndexParams params,
       QuantizationType quantization)
       throws Throwable {
 
-    // Calculate M as cagraGraphDegree/2
-    int M = graphDegree / 2;
+    int M = Math.ceilDiv((int) adjacencyListMatrix.columns(), 2);
 
     // Store all layers data
     List<int[]> layerNodes = new ArrayList<>();
@@ -309,8 +308,7 @@ public class AcceleratedHNSWUtils {
       long vectorIndexLength,
       int count,
       HnswGraph graph,
-      int[][] graphLevelNodeOffsets,
-      int graphDegree)
+      int[][] graphLevelNodeOffsets)
       throws IOException {
 
     meta.writeInt(field.number);
@@ -320,7 +318,10 @@ public class AcceleratedHNSWUtils {
     meta.writeVLong(vectorIndexLength);
     meta.writeVInt(field.getVectorDimension());
     meta.writeInt(count);
-    meta.writeVInt(graphDegree / 2); // M = cagraGraphDegree/2
+    // M = ceil(cagraGraphDegree / 2), derived from the graph being written rather than from a
+    // caller-supplied degree: graph.maxConn() is the widest layer-0 adjacency row, which is the
+    // degree cuVS actually built (it may truncate the requested one for small datasets).
+    meta.writeVInt(graph == null ? 0 : Math.ceilDiv(graph.maxConn(), 2));
 
     // write graph nodes on each level
     if (graph == null) {
@@ -394,7 +395,7 @@ public class AcceleratedHNSWUtils {
    * @throws IOException I/O Exceptions
    */
   public static void writeEmpty(FieldInfo fieldInfo, IndexOutput op) throws IOException {
-    writeMeta(null, op, fieldInfo, 0, 0, 0, null, null, 0);
+    writeMeta(null, op, fieldInfo, 0, 0, 0, null, null);
   }
 
   /**
