@@ -69,7 +69,7 @@ while [[ "$#" -gt 0 ]]; do
       echo "  cpu-hnsw, gpu-cagra-built-hnsw, gpu-cagra-search, gpu"
       echo
       echo "Behavior groups:"
-      echo "  execution-paths, segment-topologies, force-merges,"
+      echo "  execution-paths, single-document, segment-topologies, force-merges,"
       echo "  hnsw-layer-counts, cagra-search-widths,"
       echo "  deleted-documents, document-filter, all"
       echo

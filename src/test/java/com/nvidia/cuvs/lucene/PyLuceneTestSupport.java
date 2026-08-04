@@ -103,7 +103,12 @@ public final class PyLuceneTestSupport {
                 + className(vectorsReader));
       }
 
-      int actualM = persistedHnswM(vectorsReader, getField());
+      var fieldInfo = context.reader().getFieldInfos().fieldInfo(getField());
+      if (fieldInfo == null) {
+        throw new AssertionError("HNSW field metadata has no field info for: " + getField());
+      }
+
+      int actualM = persistedHnswM(vectorsReader, getField(), fieldInfo.number);
       if (actualM != expectedM) {
         throw new AssertionError(
             "HNSW graph-verifying query expected persisted M "
@@ -115,17 +120,20 @@ public final class PyLuceneTestSupport {
       }
     }
 
-    private static int persistedHnswM(KnnVectorsReader vectorsReader, String fieldName) {
+    private static int persistedHnswM(
+        KnnVectorsReader vectorsReader, String fieldName, int fieldNumber) {
       // The PyLucene bindings do not expose persisted M through their wrapped HNSW graph API.
       try {
         Field fieldsField = vectorsReader.getClass().getDeclaredField("fields");
         fieldsField.setAccessible(true);
         Object fieldsValue = fieldsField.get(vectorsReader);
-        if (!(fieldsValue instanceof Map<?, ?> fields)) {
-          throw new AssertionError(
-              "Unexpected HNSW field metadata container: " + className(fieldsValue));
+        Object fieldEntry;
+        if (fieldsValue instanceof Map<?, ?> fields) {
+          fieldEntry = fields.get(fieldName);
+        } else {
+          Method getAccessor = fieldsValue.getClass().getMethod("get", int.class);
+          fieldEntry = getAccessor.invoke(fieldsValue, fieldNumber);
         }
-        Object fieldEntry = fields.get(fieldName);
         if (fieldEntry == null) {
           throw new AssertionError("Persisted HNSW metadata has no entry for field: " + fieldName);
         }

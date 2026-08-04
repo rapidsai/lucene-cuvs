@@ -130,6 +130,7 @@ class ExecutionPath(Enum):
 class DocumentSetup(Enum):
     ALL_SEARCHABLE = "all-searchable"
     ONE_DELETED = "one-deleted"
+    SINGLE_LIVE = "single-live"
 
 
 @dataclass(frozen=True)
@@ -218,6 +219,16 @@ def _document_configuration(
     document_count: int, setup: DocumentSetup
 ) -> DocumentConfiguration:
     middle_document_id = document_count // 2
+    if setup is DocumentSetup.SINGLE_LIVE:
+        deleted_document_ids = frozenset(
+            document_id
+            for document_id in range(document_count)
+            if document_id != middle_document_id
+        )
+        return DocumentConfiguration(
+            document_ids_to_delete=deleted_document_ids,
+            additional_query_document_ids=(0,),
+        )
     if setup is DocumentSetup.ONE_DELETED:
         return DocumentConfiguration(
             document_ids_to_delete=frozenset({middle_document_id}),
@@ -572,6 +583,15 @@ SEGMENT_CASES = (
     ),
 )
 
+SINGLE_DOCUMENT_CASES = (
+    _cagra_search_case(
+        "gpu-cagra-search-single-doc",
+        "gpu-cagra-search-single-doc",
+        document_setup=DocumentSetup.SINGLE_LIVE,
+        groups=("single-document",),
+    ),
+)
+
 FORCE_MERGE_CASES = (
     _cpu_hnsw_case(
         "cpu-hnsw-10-to-1-force-merge",
@@ -639,8 +659,8 @@ HNSW_LAYER_CASES = (
 
 CAGRA_SEARCH_WIDTH_CASES = (
     _cagra_search_case(
-        "gpu-cagra-search-width-1",
-        "1",
+        "gpu-cagra-search-1-segment",
+        "1-segment-width-1",
         groups=(
             "execution-paths",
             "algorithm-matrix",
@@ -648,7 +668,7 @@ CAGRA_SEARCH_WIDTH_CASES = (
             "cagra-search-widths",
         ),
         legacy_aliases=(
-            "gpu-cagra-search-1-segment",
+            "gpu-cagra-search-width-1",
             "cagra-1seg",
         ),
     ),
@@ -1113,6 +1133,20 @@ def test_search_with_configured_segment_count(
     result, _ = _run_and_verify(case, pylucene_context)
     assert not result.document_ids_without_vectors
     assert not result.deleted_document_ids
+
+
+@pytest.mark.parametrize("case", _case_parameters(SINGLE_DOCUMENT_CASES))
+def test_cagra_search_with_single_live_document(
+    pylucene_context: PyLuceneContext, case: EndToEndCase
+) -> None:
+    result, _ = _run_and_verify(case, pylucene_context)
+    assert result.live_document_count == 1
+    assert len(result.searchable_vector_document_ids) == 1
+    assert len(result.deleted_document_ids) == result.max_document_count - 1
+    assert any(
+        observation.query_document_state is QueryDocumentState.DELETED
+        for observation in result.query_observations
+    )
 
 
 @pytest.mark.parametrize("case", _case_parameters(FORCE_MERGE_CASES))

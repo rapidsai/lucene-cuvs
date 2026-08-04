@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION.
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 set -euo pipefail
@@ -59,6 +59,27 @@ if [ -d "$CONDA_PKG_CACHE_DIR" ]; then
 else
   echo "==> Directory '$CONDA_PKG_CACHE_DIR' does not exist. Not updating LD_LIBRARY_PATH"
   exit 1
+fi
+
+# When RAPIDS_BRANCH points at a cuvs PR, the conda packages do not contain the
+# PR's changes, so download the pre-built libcuvs artifact from the PR's own CI run.
+BRANCH=$(cat "RAPIDS_BRANCH")
+if [[ "$BRANCH" == pull-request/* ]]; then
+  rapids-logger "Remove libcuvs from conda environment"
+  # Uninstall the conda libcuvs so the JVM's RPATH (which points to the conda
+  # env's lib dir) cannot find the old libcuvs_c.so ahead of the PR artifact.
+  set +u
+  conda remove --yes --force-remove libcuvs
+  set -u
+  # Download PR artifact
+  PR_NUM="${BRANCH#pull-request/}"
+  rapids-logger "Downloading libcuvs conda artifact from cuvs PR #${PR_NUM}"
+  LIBCUVS_CONDA_DIR=$(rapids-get-pr-artifact NVIDIA/cuvs "$PR_NUM" cpp conda)
+  LIBCUVS_ARTIFACT_DIR=$(rapids-extract-conda-files "$LIBCUVS_CONDA_DIR")
+  # The PR artifact must take precedence over the conda-installed libcuvs both
+  # at runtime and for cmake's find_package (to pick up new C API headers for jextract).
+  export LD_LIBRARY_PATH="$LIBCUVS_ARTIFACT_DIR/lib:$LD_LIBRARY_PATH"
+  export cuvs_ROOT="$LIBCUVS_ARTIFACT_DIR"
 fi
 
 rapids-logger "Run Java build"

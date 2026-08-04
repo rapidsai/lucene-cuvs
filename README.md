@@ -62,6 +62,21 @@ The example below plugs the GPU-accelerated HNSW codec into a standard Lucene `I
 
 Before running it, make sure cuVS is installed and available on your system library load path. The cuVS [tarball install instructions](https://docs.rapids.ai/api/cuvs/stable/build/#download-extract) show how to set this up.
 
+### RMM async allocation for GPU search
+
+Applications using `CuVS2510GPUSearchCodec` can opt into RMM's stream-ordered asynchronous device
+allocator during startup:
+
+```java
+CuVSProvider.provider().enableRMMAsyncMemory();
+```
+
+Call this before creating any cuVS resources, codecs, writers, or readers. The setting affects the
+entire process on the current CUDA device, so allocator policy belongs to the application rather
+than an individual Lucene codec. Async allocation is optional for correctness and recommended for
+GPU workloads with repeated device allocations, especially concurrent or multi-stream searches.
+Applications that do not opt in use the default RMM device-memory resource.
+
 In a Maven project that includes the `cuvs-lucene` dependency shown above, create `src/main/java/com/nvidia/cuvs/lucene/examples/HelloCuvsLucene.java`:
 
 ```java
@@ -204,9 +219,11 @@ verify the persisted graph shape. CAGRA cases use `graphDegree=32` and
 
 Vectors and queries are deterministic. Expected neighbors are computed with
 brute force. Queries for live indexed vectors check rank-one self matches,
-duplicate hits, and a configurable recall floor. Separate tests cover segment
-topology, force merges, HNSW layer count, CAGRA `searchWidth` values 1, 16, and
-32, and document filters. A dedicated CAGRA-search case verifies that a deleted
+duplicate hits, and a configurable recall floor. Separate tests cover a single
+live document, segment topology, force merges, HNSW layer count, CAGRA
+`searchWidth` values 1, 16, and 32, and document filters. The single-document
+case builds enough vectors to avoid cuVS graph clamping, then deletes all but
+one before search. A dedicated CAGRA-search case also verifies that one deleted
 document is not returned. Set the recall floor with `--min-recall=FLOAT` in the
 wrapper or `CUVS_LUCENE_PYLUCENE_MIN_RECALL` for direct pytest execution.
 The default floor is `0.75`.
@@ -218,8 +235,8 @@ than `topK` accepted vectors so Lucene exercises approximate native
 prefiltering; results are checked against brute-force neighbors from only the
 accepted vectors.
 
-Useful behavior groups include `execution-paths`, `segment-topologies`,
-`force-merges`, `hnsw-layer-counts`, `cagra-search-widths`,
+Useful behavior groups include `execution-paths`, `single-document`,
+`segment-topologies`, `force-merges`, `hnsw-layer-counts`, `cagra-search-widths`,
 `deleted-documents`, and `document-filter`.
 
 Run the complete CPU/GPU end-to-end suite with:
