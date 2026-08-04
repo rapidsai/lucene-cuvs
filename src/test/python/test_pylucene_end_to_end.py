@@ -32,6 +32,7 @@ pytestmark = pytest.mark.filterwarnings(
     "ignore:builtin type .* has no __module__ attribute:DeprecationWarning"
 )
 
+# TODO(https://github.com/NVIDIA/cuvs/issues/2407): Add multithreaded concurrency coverage.
 
 HNSW_CODEC = "Lucene101AcceleratedHNSWCodec"
 CAGRA_HNSW_BASE_LAYER_CODEC = "Lucene101AcceleratedHNSWBaseLayerCodec"
