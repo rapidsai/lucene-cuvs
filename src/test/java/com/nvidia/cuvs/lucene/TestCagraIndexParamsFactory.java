@@ -86,6 +86,45 @@ public class TestCagraIndexParamsFactory extends LuceneTestCase {
         .build();
   }
 
+  /**
+   * The configured metric must survive every strategy on both paths. It describes the data, not the
+   * build strategy: a graph built under the wrong metric degrades recall silently, with no error at
+   * build or search time.
+   *
+   * <p>The accelerated-HNSW HEURISTIC case is the subtle one -- {@code fromHnswParams} forwards the
+   * metric to the build heuristic but never assigns it to the params it returns, so reading the
+   * metric back off its result yields cuVS' L2Expanded default. Requires the native cuVS library
+   * for the paths that call into it.
+   */
+  @Test
+  public void testMetricSurvivesEveryStrategy() {
+    assumeTrue("cuVS not supported", isSupported());
+
+    for (GPUSearchParams.Strategy strategy : GPUSearchParams.Strategy.values()) {
+      GPUSearchParams gpuParams =
+          new GPUSearchParams.Builder()
+              .withStrategy(strategy)
+              .withCuvsDistanceType(CuvsDistanceType.InnerProduct)
+              .build();
+      assertEquals(
+          "GPU-native path lost the metric under " + strategy,
+          CuvsDistanceType.InnerProduct,
+          CagraIndexParamsFactory.create(gpuParams, 10_000, 128).getCuvsDistanceType());
+    }
+
+    for (AcceleratedHNSWParams.Strategy strategy : AcceleratedHNSWParams.Strategy.values()) {
+      AcceleratedHNSWParams hnswParams =
+          new AcceleratedHNSWParams.Builder()
+              .withStrategy(strategy)
+              .withCuvsDistanceType(CuvsDistanceType.InnerProduct)
+              .build();
+      assertEquals(
+          "accelerated-HNSW path lost the metric under " + strategy,
+          CuvsDistanceType.InnerProduct,
+          CagraIndexParamsFactory.create(hnswParams, 10_000, 128).getCuvsDistanceType());
+    }
+  }
+
   /** Build quality is validated at build() time rather than surfacing as a native failure. */
   @Test
   public void testBuildQualityBounds() {

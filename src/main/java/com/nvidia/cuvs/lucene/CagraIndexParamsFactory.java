@@ -33,7 +33,8 @@ public class CagraIndexParamsFactory {
         new CagraIndexParams.Builder()
             .withGraphDegree(gpuSearchParams.getGraphdegree())
             .withIntermediateGraphDegree(gpuSearchParams.getIntermediateGraphDegree())
-            .withNumWriterThreads(gpuSearchParams.getWriterThreads());
+            .withNumWriterThreads(gpuSearchParams.getWriterThreads())
+            .withMetric(gpuSearchParams.getCuvsDistanceType());
     if (gpuSearchParams.getStrategy().equals(GPUSearchParams.Strategy.HEURISTIC)) {
       // Delegate the build-algorithm choice and its parameters to cuVS' dataset heuristic, which
       // switches on the row count and tunes the algorithm with the caller's build quality. The
@@ -49,8 +50,7 @@ public class CagraIndexParamsFactory {
       builder
           .withCagraGraphBuildAlgo(derived.getCagraGraphBuildAlgo())
           .withCuVSIvfPqParams(derived.getCuVSIvfPqParams())
-          .withNNDescentNumIterations(derived.getNNDescentNumIterations())
-          .withMetric(derived.getCuvsDistanceType());
+          .withNNDescentNumIterations(derived.getNNDescentNumIterations());
     } else {
       // CUSTOM: forward the caller's algorithm and the parameters it consumes -- IVF-PQ params for
       // IVF_PQ, nn-descent iterations for NN_DESCENT (each is ignored by the other algorithm).
@@ -93,7 +93,7 @@ public class CagraIndexParamsFactory {
           .withCagraGraphBuildAlgo(derived.getCagraGraphBuildAlgo())
           .withCuVSIvfPqParams(derived.getCuVSIvfPqParams())
           .withNNDescentNumIterations(derived.getNNDescentNumIterations())
-          .withMetric(derived.getCuvsDistanceType())
+          .withMetric(acceleratedHNSWParams.getCuvsDistanceType())
           .withNumWriterThreads(acceleratedHNSWParams.getWriterThreads())
           .build();
     }
@@ -104,6 +104,7 @@ public class CagraIndexParamsFactory {
         .withCagraGraphBuildAlgo(acceleratedHNSWParams.getCagraGraphBuildAlgo())
         .withCuVSIvfPqParams(acceleratedHNSWParams.getCuVSIvfPqParams())
         .withNNDescentNumIterations(acceleratedHNSWParams.getNNDescentNumIterations())
+        .withMetric(acceleratedHNSWParams.getCuvsDistanceType())
         .build();
   }
 }
