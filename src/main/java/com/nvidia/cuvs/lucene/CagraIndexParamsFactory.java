@@ -29,17 +29,9 @@ public class CagraIndexParamsFactory {
    */
   public static CagraIndexParams create(
       GPUSearchParams gpuSearchParams, long rows, long dimension) {
-    CagraIndexParams.Builder builder =
-        new CagraIndexParams.Builder()
-            .withGraphDegree(gpuSearchParams.getGraphdegree())
-            .withIntermediateGraphDegree(gpuSearchParams.getIntermediateGraphDegree())
-            .withNumWriterThreads(gpuSearchParams.getWriterThreads())
-            .withMetric(gpuSearchParams.getCuvsDistanceType());
     if (gpuSearchParams.getStrategy().equals(GPUSearchParams.Strategy.HEURISTIC)) {
       // Delegate the build-algorithm choice and its parameters to cuVS' dataset heuristic, which
-      // switches on the row count and tunes the algorithm with the caller's build quality. The
-      // graph degrees fromDataset would derive are discarded in favour of the caller's, which this
-      // class honours under both strategies.
+      // switches on the row count and tunes the algorithm with the caller's build quality.
       CagraIndexParams derived =
           CagraIndexParams.fromDataset(
               rows,
@@ -47,19 +39,27 @@ public class CagraIndexParamsFactory {
               gpuSearchParams.getGraphdegree(),
               gpuSearchParams.getCuvsDistanceType(),
               gpuSearchParams.getBuildQuality());
-      builder
+      return new CagraIndexParams.Builder()
+          .withGraphDegree(derived.getGraphDegree())
+          .withIntermediateGraphDegree(derived.getIntermediateGraphDegree())
           .withCagraGraphBuildAlgo(derived.getCagraGraphBuildAlgo())
           .withCuVSIvfPqParams(derived.getCuVSIvfPqParams())
-          .withNNDescentNumIterations(derived.getNNDescentNumIterations());
-    } else {
-      // CUSTOM: forward the caller's algorithm and the parameters it consumes -- IVF-PQ params for
-      // IVF_PQ, nn-descent iterations for NN_DESCENT (each is ignored by the other algorithm).
-      builder
-          .withCagraGraphBuildAlgo(gpuSearchParams.getCagraGraphBuildAlgo())
-          .withCuVSIvfPqParams(gpuSearchParams.getCuVSIvfPqParams())
-          .withNNDescentNumIterations(gpuSearchParams.getnNDescentNumIterations());
+          .withNNDescentNumIterations(derived.getNNDescentNumIterations())
+          .withMetric(gpuSearchParams.getCuvsDistanceType())
+          .withNumWriterThreads(gpuSearchParams.getWriterThreads())
+          .build();
     }
-    return builder.build();
+    // CUSTOM: forward the caller's algorithm and the parameters it consumes -- IVF-PQ params for
+    // IVF_PQ, nn-descent iterations for NN_DESCENT (each is ignored by the other algorithm).
+    return new CagraIndexParams.Builder()
+        .withGraphDegree(gpuSearchParams.getGraphdegree())
+        .withIntermediateGraphDegree(gpuSearchParams.getIntermediateGraphDegree())
+        .withCagraGraphBuildAlgo(gpuSearchParams.getCagraGraphBuildAlgo())
+        .withCuVSIvfPqParams(gpuSearchParams.getCuVSIvfPqParams())
+        .withNNDescentNumIterations(gpuSearchParams.getnNDescentNumIterations())
+        .withMetric(gpuSearchParams.getCuvsDistanceType())
+        .withNumWriterThreads(gpuSearchParams.getWriterThreads())
+        .build();
   }
 
   /**
@@ -98,13 +98,13 @@ public class CagraIndexParamsFactory {
           .build();
     }
     return new CagraIndexParams.Builder()
-        .withNumWriterThreads(acceleratedHNSWParams.getWriterThreads())
-        .withIntermediateGraphDegree(acceleratedHNSWParams.getIntermediateGraphDegree())
         .withGraphDegree(acceleratedHNSWParams.getGraphdegree())
+        .withIntermediateGraphDegree(acceleratedHNSWParams.getIntermediateGraphDegree())
         .withCagraGraphBuildAlgo(acceleratedHNSWParams.getCagraGraphBuildAlgo())
         .withCuVSIvfPqParams(acceleratedHNSWParams.getCuVSIvfPqParams())
         .withNNDescentNumIterations(acceleratedHNSWParams.getNNDescentNumIterations())
         .withMetric(acceleratedHNSWParams.getCuvsDistanceType())
+        .withNumWriterThreads(acceleratedHNSWParams.getWriterThreads())
         .build();
   }
 }

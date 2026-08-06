@@ -46,9 +46,12 @@ public class TestCagraIndexParamsFactory extends LuceneTestCase {
     CagraIndexParams cagraParams = CagraIndexParamsFactory.create(params, 10_000, 128);
 
     assertEquals(CagraGraphBuildAlgo.NN_DESCENT, cagraParams.getCagraGraphBuildAlgo());
-    // The caller's degrees survive; fromDataset would otherwise force intermediate = 1.5 * degree.
+    // The graph degree is an input to the heuristic, so it survives...
     assertEquals(48, cagraParams.getGraphDegree());
-    assertEquals(96, cagraParams.getIntermediateGraphDegree());
+    // ...but the intermediate degree is derived as graph_degree * 3 / 2, overriding the configured
+    // 96. cuVS derives the build parameters from that value, so the two must stay in step.
+    assertEquals(48 * 3 / 2, cagraParams.getIntermediateGraphDegree());
+    // writerThreads has no fromDataset argument and is re-attached by the factory.
     assertEquals(4, cagraParams.getNumWriterThreads());
     assertEquals(CuvsDistanceType.InnerProduct, cagraParams.getCuvsDistanceType());
   }
