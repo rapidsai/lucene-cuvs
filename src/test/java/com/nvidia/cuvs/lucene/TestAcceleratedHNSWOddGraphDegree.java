@@ -103,6 +103,11 @@ public class TestAcceleratedHNSWOddGraphDegree extends LuceneTestCase {
 
   @After
   public void afterTest() throws Exception {
+    // JUnit runs @After even when @Before ends in a skipped assumption, at which point the path was
+    // never assigned. Dereferencing it would turn the skip into a failure on machines without cuVS.
+    if (indexDirPath == null) {
+      return;
+    }
     var dir = indexDirPath.toFile();
     if (dir.exists() && dir.isDirectory()) {
       FileUtils.deleteDirectory(dir);
