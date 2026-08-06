@@ -43,7 +43,6 @@ public class GPUSearchParams {
   public static final int MIN_NN_DESCENT_NUM_ITERATIONS = 1;
   public static final int MAX_NN_DESCENT_NUM_ITERATIONS = 100;
   public static final int MIN_BUILD_QUALITY = 0;
-  public static final int MAX_BUILD_QUALITY = 20;
 
   public static final int DEFAULT_INT_GRAPH_DEGREE = 128;
   public static final int DEFAULT_GRAPH_DEGREE = 64;
@@ -370,7 +369,8 @@ public class GPUSearchParams {
      *
      * Only consulted under the {@link Strategy#HEURISTIC} strategy.
      *
-     * Valid range - Minimum: {@value MIN_BUILD_QUALITY}, Maximum: {@value MAX_BUILD_QUALITY}
+     * Valid range - Minimum: {@value MIN_BUILD_QUALITY}, unbounded above. cuVS documents any value
+     * as valid, with values below 20 being the most practical.
      * Default value - {@value DEFAULT_BUILD_QUALITY}
      *
      * @param buildQuality the build quality to set
@@ -433,13 +433,9 @@ public class GPUSearchParams {
                 + MAX_NN_DESCENT_NUM_ITERATIONS
                 + "]");
       }
-      if (buildQuality < MIN_BUILD_QUALITY || buildQuality > MAX_BUILD_QUALITY) {
+      if (buildQuality < MIN_BUILD_QUALITY) {
         throw new IllegalArgumentException(
-            "buildQuality not in valid range. Valid range: ["
-                + MIN_BUILD_QUALITY
-                + ", "
-                + MAX_BUILD_QUALITY
-                + "]");
+            "buildQuality must not be less than " + MIN_BUILD_QUALITY + ".");
       }
     }
 

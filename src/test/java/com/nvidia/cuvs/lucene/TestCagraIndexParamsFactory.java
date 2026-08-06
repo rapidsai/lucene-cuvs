@@ -125,18 +125,20 @@ public class TestCagraIndexParamsFactory extends LuceneTestCase {
     }
   }
 
-  /** Build quality is validated at build() time rather than surfacing as a native failure. */
+  /**
+   * Only the lower bound is enforced. A negative build quality is rejected at build() time because
+   * it would wrap when handed to cuVS' {@code size_t} parameter, but cuVS documents any non-negative
+   * value as valid -- so large values must be accepted rather than second-guessed here. Pure Java,
+   * no GPU needed.
+   */
   @Test
-  public void testBuildQualityBounds() {
+  public void testBuildQualityRejectsNegativeOnly() {
     expectThrows(
         IllegalArgumentException.class,
         () -> new GPUSearchParams.Builder().withBuildQuality(-1).build());
-    expectThrows(
-        IllegalArgumentException.class,
-        () ->
-            new GPUSearchParams.Builder()
-                .withBuildQuality(GPUSearchParams.MAX_BUILD_QUALITY + 1)
-                .build());
+
+    // Well above the value cuVS calls "most practical"; unusual, but not ours to reject.
+    assertEquals(50, new GPUSearchParams.Builder().withBuildQuality(50).build().getBuildQuality());
   }
 
   /**
