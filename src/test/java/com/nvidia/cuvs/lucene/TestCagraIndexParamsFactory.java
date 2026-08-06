@@ -26,10 +26,13 @@ public class TestCagraIndexParamsFactory extends LuceneTestCase {
 
   /**
    * The GPU-native HEURISTIC path hands the build-algorithm decision to cuVS (AUTO_SELECT) while
-   * keeping the caller-supplied CAGRA-native graph degrees and metric. Pure Java, no GPU needed.
+   * keeping the caller-supplied CAGRA-native graph degrees, writer threads and metric. Requires the
+   * native cuVS library.
    */
   @Test
-  public void testGpuHeuristicUsesAutoSelect() {
+  public void testGpuHeuristicDelegatesToCuVS() {
+    assumeTrue("cuVS not supported", isSupported());
+
     GPUSearchParams params =
         new GPUSearchParams.Builder()
             .withStrategy(GPUSearchParams.Strategy.HEURISTIC)
@@ -39,13 +42,62 @@ public class TestCagraIndexParamsFactory extends LuceneTestCase {
             .withWriterThreads(4)
             .build();
 
-    CagraIndexParams cagraParams = CagraIndexParamsFactory.create(params);
+    // Below cuVS' 1M-row crossover, so the dataset heuristic selects NN-descent.
+    CagraIndexParams cagraParams = CagraIndexParamsFactory.create(params, 10_000, 128);
 
-    assertEquals(CagraGraphBuildAlgo.AUTO_SELECT, cagraParams.getCagraGraphBuildAlgo());
+    assertEquals(CagraGraphBuildAlgo.NN_DESCENT, cagraParams.getCagraGraphBuildAlgo());
+    // The caller's degrees survive; fromDataset would otherwise force intermediate = 1.5 * degree.
     assertEquals(48, cagraParams.getGraphDegree());
     assertEquals(96, cagraParams.getIntermediateGraphDegree());
     assertEquals(4, cagraParams.getNumWriterThreads());
     assertEquals(CuvsDistanceType.InnerProduct, cagraParams.getCuvsDistanceType());
+  }
+
+  /**
+   * Build quality reaches cuVS: NN-descent runs {@code 5 + buildQuality} iterations, so two
+   * different qualities must produce two different iteration counts. Requires the native cuVS
+   * library.
+   */
+  @Test
+  public void testGpuBuildQualityIsHonored() {
+    assumeTrue("cuVS not supported", isSupported());
+
+    long low =
+        CagraIndexParamsFactory.create(gpuParamsWithQuality(1), 10_000, 128)
+            .getNNDescentNumIterations();
+    long high =
+        CagraIndexParamsFactory.create(gpuParamsWithQuality(15), 10_000, 128)
+            .getNNDescentNumIterations();
+    long dflt =
+        CagraIndexParamsFactory.create(
+                gpuParamsWithQuality(GPUSearchParams.DEFAULT_BUILD_QUALITY), 10_000, 128)
+            .getNNDescentNumIterations();
+
+    // cuVS derives max_iterations as 5 + buildQuality; assert the relationship it documents rather
+    // than hardcoding values it owns.
+    assertEquals(low + 14, high);
+    assertTrue("higher build quality must not reduce work", dflt > low && dflt < high);
+  }
+
+  private static GPUSearchParams gpuParamsWithQuality(int buildQuality) {
+    return new GPUSearchParams.Builder()
+        .withStrategy(GPUSearchParams.Strategy.HEURISTIC)
+        .withBuildQuality(buildQuality)
+        .build();
+  }
+
+  /** Build quality is validated at build() time rather than surfacing as a native failure. */
+  @Test
+  public void testBuildQualityBounds() {
+    expectThrows(
+        IllegalArgumentException.class,
+        () -> new GPUSearchParams.Builder().withBuildQuality(-1).build());
+    expectThrows(
+        IllegalArgumentException.class,
+        () ->
+            new GPUSearchParams.Builder()
+                .withBuildQuality(GPUSearchParams.MAX_BUILD_QUALITY + 1)
+                .build());
   }
 
   /**
@@ -63,7 +115,7 @@ public class TestCagraIndexParamsFactory extends LuceneTestCase {
             .withWriterThreads(12)
             .build();
 
-    CagraIndexParams cagraParams = CagraIndexParamsFactory.create(params);
+    CagraIndexParams cagraParams = CagraIndexParamsFactory.create(params, 10_000, 128);
 
     assertEquals(CagraGraphBuildAlgo.NN_DESCENT, cagraParams.getCagraGraphBuildAlgo());
     assertEquals(32, cagraParams.getGraphDegree());
@@ -169,9 +221,10 @@ public class TestCagraIndexParamsFactory extends LuceneTestCase {
             .withCagraGraphBuildAlgo(CagraGraphBuildAlgo.IVF_PQ)
             .build();
     assertEquals(CagraGraphBuildAlgo.IVF_PQ, gpuParams.getCagraGraphBuildAlgo());
-    // ... but AUTO_SELECT is what actually reaches cuVS.
+    // ... but for a small dataset cuVS' heuristic selects NN-descent regardless.
+    assumeTrue("cuVS not supported", isSupported());
     assertEquals(
-        CagraGraphBuildAlgo.AUTO_SELECT,
-        CagraIndexParamsFactory.create(gpuParams).getCagraGraphBuildAlgo());
+        CagraGraphBuildAlgo.NN_DESCENT,
+        CagraIndexParamsFactory.create(gpuParams, 10_000, 128).getCagraGraphBuildAlgo());
   }
 }

@@ -6,7 +6,6 @@
 package com.nvidia.cuvs.lucene;
 
 import com.nvidia.cuvs.CagraIndexParams;
-import com.nvidia.cuvs.CagraIndexParams.CagraGraphBuildAlgo;
 
 /**
  * A centralized place for producing {@link CagraIndexParams} from the cuvs-lucene input parameter
@@ -24,20 +23,34 @@ public class CagraIndexParamsFactory {
    * chosen strategy in the {@link GPUSearchParams}.
    *
    * @param gpuSearchParams the input parameters for the build and search on the GPU API
+   * @param rows number of vectors in the data set
+   * @param dimension the dimension of the vectors in the data set
    * @return an instance of {@link CagraIndexParams}
    */
-  public static CagraIndexParams create(GPUSearchParams gpuSearchParams) {
+  public static CagraIndexParams create(
+      GPUSearchParams gpuSearchParams, long rows, long dimension) {
     CagraIndexParams.Builder builder =
         new CagraIndexParams.Builder()
             .withGraphDegree(gpuSearchParams.getGraphdegree())
             .withIntermediateGraphDegree(gpuSearchParams.getIntermediateGraphDegree())
             .withNumWriterThreads(gpuSearchParams.getWriterThreads());
     if (gpuSearchParams.getStrategy().equals(GPUSearchParams.Strategy.HEURISTIC)) {
-      // AUTO_SELECT: cuVS picks the build algorithm and derives its parameters at build time, so
-      // the IVF-PQ params and nn-descent iterations are left to cuVS rather than forwarded here.
+      // Delegate the build-algorithm choice and its parameters to cuVS' dataset heuristic, which
+      // switches on the row count and tunes the algorithm with the caller's build quality. The
+      // graph degrees fromDataset would derive are discarded in favour of the caller's, which this
+      // class honours under both strategies.
+      CagraIndexParams derived =
+          CagraIndexParams.fromDataset(
+              rows,
+              dimension,
+              gpuSearchParams.getGraphdegree(),
+              gpuSearchParams.getCuvsDistanceType(),
+              gpuSearchParams.getBuildQuality());
       builder
-          .withCagraGraphBuildAlgo(CagraGraphBuildAlgo.AUTO_SELECT)
-          .withMetric(gpuSearchParams.getCuvsDistanceType());
+          .withCagraGraphBuildAlgo(derived.getCagraGraphBuildAlgo())
+          .withCuVSIvfPqParams(derived.getCuVSIvfPqParams())
+          .withNNDescentNumIterations(derived.getNNDescentNumIterations())
+          .withMetric(derived.getCuvsDistanceType());
     } else {
       // CUSTOM: forward the caller's algorithm and the parameters it consumes -- IVF-PQ params for
       // IVF_PQ, nn-descent iterations for NN_DESCENT (each is ignored by the other algorithm).

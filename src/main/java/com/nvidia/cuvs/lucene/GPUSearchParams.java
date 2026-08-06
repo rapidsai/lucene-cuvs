@@ -42,6 +42,8 @@ public class GPUSearchParams {
   public static final int MAX_GRAPH_DEG = 512;
   public static final int MIN_NN_DESCENT_NUM_ITERATIONS = 1;
   public static final int MAX_NN_DESCENT_NUM_ITERATIONS = 100;
+  public static final int MIN_BUILD_QUALITY = 0;
+  public static final int MAX_BUILD_QUALITY = 20;
 
   public static final int DEFAULT_INT_GRAPH_DEGREE = 128;
   public static final int DEFAULT_GRAPH_DEGREE = 64;
@@ -52,6 +54,9 @@ public class GPUSearchParams {
   public static final Strategy DEFAULT_STRATEGY = Strategy.HEURISTIC;
   public static final CuvsDistanceType DEFAULT_CUVS_DISTANCE_TYPE = CuvsDistanceType.L2Expanded;
   public static final int DEFAULT_NN_DESCENT_NUM_ITERATIONS = 20;
+
+  /** cuVS' own default for the build-quality heuristic input. */
+  public static final int DEFAULT_BUILD_QUALITY = 7;
 
   public static final Supplier<CuVSIvfPqParams> DEFAULT_IVF_PQ_PARAMS =
       () -> {
@@ -67,6 +72,7 @@ public class GPUSearchParams {
   private final Strategy strategy;
   private final CuvsDistanceType cuvsDistanceType;
   private final int nnDescentNumIterations;
+  private final int buildQuality;
 
   /**
    * Constructs an instance of {@link GPUSearchParams} with specific parameter values.
@@ -80,6 +86,7 @@ public class GPUSearchParams {
    * @param strategy either HEURISTIC [Default] that lets cuVS auto-select the build algorithm and its parameters or CUSTOM that uses the parameters passed through this class.
    * @param cuvsDistanceType the cuvsDistanceType. The default option is L2Expanded.
    * @param nnDescentNumIterations the number of Iterations to run if building with NN_DESCENT.
+   * @param buildQuality the build quality cuVS applies when deriving the build algorithm's parameters under the HEURISTIC strategy. Higher values trade build cost for graph quality.
    */
   private GPUSearchParams(
       int writerThreads,
@@ -90,7 +97,8 @@ public class GPUSearchParams {
       CuVSIvfPqParams cuVSIvfPqParams,
       Strategy strategy,
       CuvsDistanceType cuvsDistanceType,
-      int nnDescentNumIterations) {
+      int nnDescentNumIterations,
+      int buildQuality) {
     super();
     this.writerThreads = writerThreads;
     this.intermediateGraphDegree = intermediateGraphDegree;
@@ -101,6 +109,7 @@ public class GPUSearchParams {
     this.strategy = strategy;
     this.cuvsDistanceType = cuvsDistanceType;
     this.nnDescentNumIterations = nnDescentNumIterations;
+    this.buildQuality = buildQuality;
   }
 
   /**
@@ -188,6 +197,16 @@ public class GPUSearchParams {
     return nnDescentNumIterations;
   }
 
+  /**
+   * Get the build quality handed to cuVS' build heuristic. Only consulted under the {@link
+   * Strategy#HEURISTIC} strategy.
+   *
+   * @return the build quality
+   */
+  public int getBuildQuality() {
+    return buildQuality;
+  }
+
   @Override
   public String toString() {
     return "GPUSearchParams [writerThreads="
@@ -208,6 +227,8 @@ public class GPUSearchParams {
         + cuvsDistanceType
         + ", nnDescentNumIterations="
         + nnDescentNumIterations
+        + ", buildQuality="
+        + buildQuality
         + "]";
   }
 
@@ -225,6 +246,7 @@ public class GPUSearchParams {
     private Strategy strategy = DEFAULT_STRATEGY;
     private CuvsDistanceType cuvsDistanceType = DEFAULT_CUVS_DISTANCE_TYPE;
     private int nnDescentNumIterations = DEFAULT_NN_DESCENT_NUM_ITERATIONS;
+    private int buildQuality = DEFAULT_BUILD_QUALITY;
 
     /**
      * Set the number of cuVS writer threads while building the index
@@ -343,6 +365,23 @@ public class GPUSearchParams {
     }
 
     /**
+     * Set the build quality cuVS applies when deriving the build algorithm's parameters. Higher
+     * values trade build cost for graph quality.
+     *
+     * Only consulted under the {@link Strategy#HEURISTIC} strategy.
+     *
+     * Valid range - Minimum: {@value MIN_BUILD_QUALITY}, Maximum: {@value MAX_BUILD_QUALITY}
+     * Default value - {@value DEFAULT_BUILD_QUALITY}
+     *
+     * @param buildQuality the build quality to set
+     * @return instance of {@link Builder}
+     */
+    public Builder withBuildQuality(int buildQuality) {
+      this.buildQuality = buildQuality;
+      return this;
+    }
+
+    /**
      * Validates the input parameters.
      *
      * @throws IllegalArgumentException
@@ -394,6 +433,14 @@ public class GPUSearchParams {
                 + MAX_NN_DESCENT_NUM_ITERATIONS
                 + "]");
       }
+      if (buildQuality < MIN_BUILD_QUALITY || buildQuality > MAX_BUILD_QUALITY) {
+        throw new IllegalArgumentException(
+            "buildQuality not in valid range. Valid range: ["
+                + MIN_BUILD_QUALITY
+                + ", "
+                + MAX_BUILD_QUALITY
+                + "]");
+      }
     }
 
     /**
@@ -415,7 +462,8 @@ public class GPUSearchParams {
           cuVSIvfPqParams,
           strategy,
           cuvsDistanceType,
-          nnDescentNumIterations);
+          nnDescentNumIterations,
+          buildQuality);
     }
   }
 }
