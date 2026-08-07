@@ -7,6 +7,7 @@ package com.nvidia.cuvs.lucene;
 
 import com.nvidia.cuvs.CagraIndexParams.CagraGraphBuildAlgo;
 import com.nvidia.cuvs.CagraIndexParams.CuvsDistanceType;
+import com.nvidia.cuvs.CagraIndexParams.HnswHeuristicType;
 import com.nvidia.cuvs.CuVSIvfPqParams;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
@@ -17,9 +18,8 @@ public class AcceleratedHNSWParams {
 
   public static enum Strategy {
     /*
-     * This strategy allows for automatic selection of the underlying CAGRA build algorithm.
-     * With this strategy we use NN_DESCENT for dataset less than 5M vectors, else we use IVF_PQ.
-     * Indexing parameters, especially for IVF_PQ, are heuristically identified automatically.
+     * This strategy delegates the derivation of the CAGRA build parameters (graph degrees, build
+     * algorithm and its parameters) to cuVS, based on HNSW-equivalent maxConn and beamWidth.
      *
      * This is the default and the recommended strategy.
      */
@@ -64,6 +64,8 @@ public class AcceleratedHNSWParams {
   public static final Strategy DEFAULT_STRATEGY = Strategy.HEURISTIC;
   public static final CuvsDistanceType DEFAULT_CUVS_DISTANCE_TYPE = CuvsDistanceType.L2Expanded;
   public static final int DEFAULT_NN_DESCENT_NUM_ITERATIONS = 20;
+  public static final HnswHeuristicType DEFAULT_HNSW_HEURISTIC_TYPE =
+      HnswHeuristicType.SAME_GRAPH_FOOTPRINT;
 
   public static final Supplier<CuVSIvfPqParams> DEFAULT_IVF_PQ_PARAMS =
       () -> {
@@ -88,6 +90,7 @@ public class AcceleratedHNSWParams {
   private final Strategy strategy;
   private final CuvsDistanceType cuvsDistanceType;
   private final int nnDescentNumIterations;
+  private final HnswHeuristicType hnswHeuristicType;
 
   /**
    * Constructs an instance of {@link AcceleratedHNSWParams} with specific parameter values.
@@ -95,7 +98,6 @@ public class AcceleratedHNSWParams {
    * @param writerThreads Number of cuVS writer threads to use.
    * @param intermediateGraphDegree The intermediate graph degree while building the CAGRA index.
    * @param graphdegree The graph degree to use while building the CAGRA index.
-   * @param indexType The type of index to build - CAGRA, BRUTEFORCE, or both.
    * @param hnswLayers The number of HNSW layers to build in the HNSW index.
    * @param maxConn The max connection parameter used when building HNSW index with the fallback mechanism.
    * @param beamWidth The beam width parameter used when building HNSW index with the fallback mechanism.
@@ -103,9 +105,10 @@ public class AcceleratedHNSWParams {
    * @param cuVSIvfPqParams An instance of CuVSIvfPqParams containing IVF_PQ specific parameters.
    * @param numMergeWorkers The number of merge workers to use with the fallback mechanism.
    * @param mergeExec The instance of {@link ExecutorService} to use with the fallback mechanism.
-   * @param strategy either HEURISTIC [Default] that automatically chooses build algorithm and its parameters based on data set size or CUSTOM that uses the parameters passed though this class.
+   * @param strategy either HEURISTIC [Default] that delegates the CAGRA build parameters to cuVS (derived from the HNSW-equivalent maxConn and beamWidth) or CUSTOM that uses the parameters passed through this class.
    * @param cuvsDistanceType the cuvsDistanceType. The default option is L2Expanded.
    * @param nnDescentNumIterations the number of Iterations to run if building with NN_DESCENT.
+   * @param hnswHeuristicType the heuristic cuVS applies when deriving the CAGRA build parameters from maxConn and beamWidth under the HEURISTIC strategy.
    */
   private AcceleratedHNSWParams(
       int writerThreads,
@@ -120,7 +123,8 @@ public class AcceleratedHNSWParams {
       ExecutorService mergeExec,
       Strategy strategy,
       CuvsDistanceType cuvsDistanceType,
-      int nnDescentNumIterations) {
+      int nnDescentNumIterations,
+      HnswHeuristicType hnswHeuristicType) {
     super();
     this.writerThreads = writerThreads;
     this.intermediateGraphDegree = intermediateGraphDegree;
@@ -135,6 +139,7 @@ public class AcceleratedHNSWParams {
     this.strategy = strategy;
     this.cuvsDistanceType = cuvsDistanceType;
     this.nnDescentNumIterations = nnDescentNumIterations;
+    this.hnswHeuristicType = hnswHeuristicType;
   }
 
   /**
@@ -257,6 +262,16 @@ public class AcceleratedHNSWParams {
     return nnDescentNumIterations;
   }
 
+  /**
+   * Get the heuristic cuVS applies when deriving the CAGRA build parameters from maxConn and
+   * beamWidth. Only consulted under the {@link Strategy#HEURISTIC} strategy.
+   *
+   * @return the {@link HnswHeuristicType} to hand to cuVS
+   */
+  public HnswHeuristicType getHnswHeuristicType() {
+    return hnswHeuristicType;
+  }
+
   @Override
   public String toString() {
     return "AcceleratedHNSWParams [writerThreads="
@@ -285,6 +300,8 @@ public class AcceleratedHNSWParams {
         + cuvsDistanceType
         + ", nnDescentNumIterations="
         + nnDescentNumIterations
+        + ", hnswHeuristicType="
+        + hnswHeuristicType
         + "]";
   }
 
@@ -306,6 +323,7 @@ public class AcceleratedHNSWParams {
     private Strategy strategy = DEFAULT_STRATEGY;
     private CuvsDistanceType cuvsDistanceType = DEFAULT_CUVS_DISTANCE_TYPE;
     private int nnDescentNumIterations = DEFAULT_NN_DESCENT_NUM_ITERATIONS;
+    private HnswHeuristicType hnswHeuristicType = DEFAULT_HNSW_HEURISTIC_TYPE;
 
     /**
      * Set the number of cuVS writer threads while building the index
@@ -475,6 +493,21 @@ public class AcceleratedHNSWParams {
     }
 
     /**
+     * Set the heuristic cuVS applies when deriving the CAGRA build parameters from maxConn and
+     * beamWidth. Only consulted under the {@link Strategy#HEURISTIC} strategy.
+     *
+     * Default value - SAME_GRAPH_FOOTPRINT, which targets a CAGRA graph of the same on-disk size as
+     * the equivalent HNSW graph (graph degree = 2 * maxConn).
+     *
+     * @param hnswHeuristicType the {@link HnswHeuristicType} to hand to cuVS
+     * @return instance of {@link Builder}
+     */
+    public Builder withHnswHeuristicType(HnswHeuristicType hnswHeuristicType) {
+      this.hnswHeuristicType = hnswHeuristicType;
+      return this;
+    }
+
+    /**
      * Validates the input parameters.
      *
      * @throws IllegalArgumentException
@@ -546,6 +579,9 @@ public class AcceleratedHNSWParams {
       if (Objects.isNull(cuvsDistanceType)) {
         throw new IllegalArgumentException("cuvsDistanceType cannot be null.");
       }
+      if (Objects.isNull(hnswHeuristicType)) {
+        throw new IllegalArgumentException("hnswHeuristicType cannot be null.");
+      }
       if (nnDescentNumIterations < MIN_NN_DESCENT_NUM_ITERATIONS
           || nnDescentNumIterations > MAX_NN_DESCENT_NUM_ITERATIONS) {
         throw new IllegalArgumentException(
@@ -583,7 +619,8 @@ public class AcceleratedHNSWParams {
           mergeExec,
           strategy,
           cuvsDistanceType,
-          nnDescentNumIterations);
+          nnDescentNumIterations,
+          hnswHeuristicType);
     }
   }
 }

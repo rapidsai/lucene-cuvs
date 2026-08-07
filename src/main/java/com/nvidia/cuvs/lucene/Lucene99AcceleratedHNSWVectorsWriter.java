@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 package com.nvidia.cuvs.lucene;
@@ -178,7 +178,6 @@ public class Lucene99AcceleratedHNSWVectorsWriter extends KnnVectorsWriter {
               adjacencyListMatrix,
               vectors,
               acceleratedHNSWParams.getHnswLayers(),
-              acceleratedHNSWParams.getGraphdegree(),
               params,
               QuantizationType.NONE);
       long vectorIndexOffset = hnswVectorIndex.getFilePointer();
@@ -192,8 +191,7 @@ public class Lucene99AcceleratedHNSWVectorsWriter extends KnnVectorsWriter {
           vectorIndexLength,
           size,
           hnswGraph,
-          graphLevelNodeOffsets,
-          acceleratedHNSWParams.getGraphdegree());
+          graphLevelNodeOffsets);
       cagraIndex.close();
     } catch (Throwable t) {
       Utils.handleThrowable(t);
@@ -268,8 +266,7 @@ public class Lucene99AcceleratedHNSWVectorsWriter extends KnnVectorsWriter {
           vectorIndexLength,
           size,
           hnswGraph,
-          graphLevelNodeOffsets,
-          acceleratedHNSWParams.getGraphdegree());
+          graphLevelNodeOffsets);
     } catch (Throwable t) {
       Utils.handleThrowable(t);
     }

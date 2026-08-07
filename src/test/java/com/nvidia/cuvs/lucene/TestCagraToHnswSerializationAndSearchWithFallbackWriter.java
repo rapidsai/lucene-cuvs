@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 package com.nvidia.cuvs.lucene;
@@ -165,6 +165,12 @@ public class TestCagraToHnswSerializationAndSearchWithFallbackWriter extends Luc
   public static void afterClass() throws Exception {
     // Reset resources for other tests to work
     setCuVSResourcesInstance(cuVSResourcesOrNull());
+    // JUnit runs @AfterClass even when @BeforeClass ends in a skipped assumption, at which point
+    // the path was never assigned. Dereferencing it would turn the skip into a failure on machines
+    // without cuVS.
+    if (indexDirPath == null) {
+      return;
+    }
     File indexDirPathFile = indexDirPath.toFile();
     if (indexDirPathFile.exists() && indexDirPathFile.isDirectory()) {
       FileUtils.deleteDirectory(indexDirPathFile);
