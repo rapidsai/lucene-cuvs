@@ -61,11 +61,11 @@ jobs:
         test_java:
           - '**'
           - '!.github/CODEOWNERS'
-          - '!.github/build.yaml'
           - '!.github/copy-pr-bot.yaml'
           - '!.github/ops-bot.yaml'
           - '!.github/release.yml'
-          - '!.gihtub/test.yaml'
+          - '!.github/workflows/build.yaml'
+          - '!.github/workflows/test.yaml'
           - '!.github/zizmor.yml'
           - '!.gitignore'
           - '!.pre-commit-config.yaml'
