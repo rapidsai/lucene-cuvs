@@ -1,5 +1,8 @@
 # cuVS Lucene
 
+> [!IMPORTANT]
+> Active development of this project has moved to the [cuVS](https://github.com/NVIDIA/cuvs) repository. Please open new issues and pull requests against `cuvs-lucene` there instead of in this repository. See [NVIDIA/cuvs#2353](https://github.com/NVIDIA/cuvs/pull/2353) for more information.
+
 This is a project for using [cuVS](https://github.com/rapidsai/cuvs), NVIDIA's GPU accelerated vector search library, with [Apache Lucene](https://github.com/apache/lucene).
 
 ## Contents
