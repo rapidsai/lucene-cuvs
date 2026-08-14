@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 package com.nvidia.cuvs.lucene;
@@ -51,12 +51,22 @@ public class TestBackCompat {
   }
 
   @Test
+  @SuppressWarnings("deprecation")
   public void testProviderSupportsLucene102BinaryFormats() throws Exception {
     LuceneProvider lucene102BinaryFormatProvider =
         LuceneProvider.getInstance(LuceneProvider.LUCENE_102_BINARY_FORMAT_VERSION);
     assertNotNull(lucene102BinaryFormatProvider.getLuceneBinaryQuantizedVectorsFormatInstance());
+    assertNotNull(lucene102BinaryFormatProvider.getluceneBinaryQuantizedVectorsFormatInstance());
     assertNotNull(
-        lucene102BinaryFormatProvider.getLuceneHnswBinaryQuantizedVectorsFormatInstance(16, 100));
+        lucene102BinaryFormatProvider.getLuceneHnswBinaryQuantizedKnnVectorsFormatInstance(
+            16, 100));
+  }
+
+  @Test(expected = UnsupportedOperationException.class)
+  @SuppressWarnings("deprecation")
+  public void testLegacyHnswBinaryFormatDescriptorIsRetained() throws Exception {
+    LuceneProvider.getInstance(LuceneProvider.LUCENE_102_BINARY_FORMAT_VERSION)
+        .getLuceneHnswBinaryQuantizedVectorsFormatInstance(16, 100);
   }
 
   @Test
@@ -71,8 +81,6 @@ public class TestBackCompat {
   public void testServiceLoadedCodecsCanBeInstantiated() {
     String[] codecNames = {
       "Lucene101AcceleratedHNSWCodec",
-      "Lucene101AcceleratedHNSWBaseLayerCodec",
-      "Lucene101AcceleratedHNSWMultiLayerCodec",
       "CuVS2510GPUSearchCodec",
       "Lucene101AcceleratedHNSWBinaryQuantizedCodec",
       "Lucene101AcceleratedHNSWScalarQuantizedCodec"

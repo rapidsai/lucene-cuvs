@@ -1,6 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+"""PyLucene end-to-end coverage for CPU HNSW and GPU cuVS search paths.
+
+The parametrized cases cover segment and force-merge topologies, CAGRA search
+widths, persisted HNSW layer counts, deletions, filters, and brute-force recall.
+GPU-required cases assert that cuVS ran and did not silently fall back to the CPU path.
+"""
+
 from __future__ import annotations
 
 import os
@@ -11,9 +18,12 @@ from zipfile import ZipFile
 import pytest
 
 from pylucene_test_support import (
+    CAGRA_BUILT_HNSW_BASE_LAYER_TEST_CODEC_CLASS,
+    CAGRA_BUILT_HNSW_THREE_LAYER_TEST_CODEC_CLASS,
     CAGRA_TEST_CODEC_CLASS,
     CAGRA_TEST_QUERY_CLASS,
     CAGRA_VECTOR_READER_CLASS,
+    CPU_HNSW_TEST_CODEC_CLASS,
     HNSW_GRAPH_VERIFYING_QUERY_CLASS,
     IndexRun,
     IndexScenario,
@@ -35,14 +45,20 @@ pytestmark = pytest.mark.filterwarnings(
 # TODO(https://github.com/NVIDIA/cuvs/issues/2407): Add multithreaded concurrency coverage.
 
 HNSW_CODEC = "Lucene101AcceleratedHNSWCodec"
-CAGRA_HNSW_BASE_LAYER_CODEC = "Lucene101AcceleratedHNSWBaseLayerCodec"
-CAGRA_HNSW_MULTI_LAYER_CODEC = "Lucene101AcceleratedHNSWMultiLayerCodec"
 CAGRA_CODEC = "CuVS2510GPUSearchCodec"
+
+CPU_HNSW_WRITER_CLASS = (
+    "org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsWriter"
+)
+GPU_CAGRA_BUILT_HNSW_WRITER_CLASS = (
+    "com.nvidia.cuvs.lucene.Lucene99AcceleratedHNSWVectorsWriter"
+)
+GPU_CAGRA_SEARCH_WRITER_CLASS = (
+    "com.nvidia.cuvs.lucene.CuVS2510GPUVectorsWriter"
+)
 
 EXPECTED_SPI_CODECS = (
     HNSW_CODEC,
-    CAGRA_HNSW_BASE_LAYER_CODEC,
-    CAGRA_HNSW_MULTI_LAYER_CODEC,
     CAGRA_CODEC,
     "Lucene101AcceleratedHNSWBinaryQuantizedCodec",
     "Lucene101AcceleratedHNSWScalarQuantizedCodec",
@@ -54,8 +70,6 @@ VECTOR_FORMAT_SERVICE = (
 EXPECTED_CODEC_PROVIDERS = frozenset(
     {
         "com.nvidia.cuvs.lucene.Lucene101AcceleratedHNSWCodec",
-        "com.nvidia.cuvs.lucene.Lucene101AcceleratedHNSWBaseLayerCodec",
-        "com.nvidia.cuvs.lucene.Lucene101AcceleratedHNSWMultiLayerCodec",
         "com.nvidia.cuvs.lucene.CuVS2510GPUSearchCodec",
         (
             "com.nvidia.cuvs.lucene."
@@ -103,25 +117,25 @@ class ExecutionPath(Enum):
     CPU_HNSW = (
         "CPU HNSW build -> HNSW search",
         "cpu-hnsw",
-        "cpu-hnsw-fallback",
+        CPU_HNSW_WRITER_CLASS,
     )
     GPU_CAGRA_BUILT_HNSW = (
         "GPU CAGRA build -> HNSW search",
         "gpu-cagra-built-hnsw",
-        "gpu-hnsw",
+        GPU_CAGRA_BUILT_HNSW_WRITER_CLASS,
     )
     GPU_CAGRA_SEARCH = (
         "GPU CAGRA build -> CAGRA search",
         "gpu-cagra-search",
-        "gpu-cagra",
+        GPU_CAGRA_SEARCH_WRITER_CLASS,
     )
 
     def __init__(
-        self, label: str, selector: str, expected_writer_path: str
+        self, label: str, selector: str, expected_writer_class: str
     ) -> None:
         self.label = label
         self.selector = selector
-        self.expected_writer_path = expected_writer_path
+        self.expected_writer_class = expected_writer_class
 
     @property
     def requires_gpu(self) -> bool:
@@ -158,8 +172,6 @@ class DocumentFilterConfiguration:
 @dataclass(frozen=True)
 class EndToEndCase:
     selector: str
-    pytest_id: str
-    selection_names: frozenset[str]
     scenario: IndexScenario
     execution_path: ExecutionPath
     expected_index_file_suffixes: tuple[str, ...]
@@ -295,37 +307,13 @@ def _minimum_document_count(
     return required_document_count
 
 
-def _selection_names(
-    selector: str,
-    execution_path: ExecutionPath,
-    groups: tuple[str, ...],
-    legacy_aliases: tuple[str, ...],
-) -> frozenset[str]:
-    names = {
-        selector,
-        execution_path.selector,
-        "all",
-        *groups,
-        *legacy_aliases,
-    }
-    if execution_path.requires_gpu:
-        names.add("gpu")
-    if execution_path is ExecutionPath.GPU_CAGRA_BUILT_HNSW:
-        names.add("gpu-cagra-hnsw")
-        names.add("cagra-hnsw")
-    return frozenset(names)
-
-
 def _cpu_hnsw_case(
     selector: str,
-    pytest_id: str,
     *,
     segment_count: int = 1,
     force_merge_segment_count: int = 0,
     document_setup: DocumentSetup = DocumentSetup.ALL_SEARCHABLE,
     selective_filter: bool = False,
-    groups: tuple[str, ...] = (),
-    legacy_aliases: tuple[str, ...] = (),
 ) -> EndToEndCase:
     settings = _suite_settings()
     minimum_document_count = _minimum_document_count(
@@ -355,6 +343,7 @@ def _cpu_hnsw_case(
     scenario = IndexScenario(
         name=selector,
         codec_name=HNSW_CODEC,
+        codec_factory_class=CPU_HNSW_TEST_CODEC_CLASS,
         document_count=document_count,
         dimensions=settings.dimensions,
         top_k=settings.top_k,
@@ -365,18 +354,10 @@ def _cpu_hnsw_case(
         additional_query_document_ids=documents.additional_query_document_ids,
         document_ids_accepted_by_filter=document_filter.accepted_document_ids,
         filter_query_document_id=document_filter.query_document_id,
-        force_cpu_hnsw=True,
         expected_hnsw_m=32,
     )
     return EndToEndCase(
         selector=selector,
-        pytest_id=pytest_id,
-        selection_names=_selection_names(
-            selector,
-            ExecutionPath.CPU_HNSW,
-            groups,
-            legacy_aliases,
-        ),
         scenario=scenario,
         execution_path=ExecutionPath.CPU_HNSW,
         expected_index_file_suffixes=(".vex", ".vem"),
@@ -386,15 +367,12 @@ def _cpu_hnsw_case(
 
 def _cagra_built_hnsw_case(
     selector: str,
-    pytest_id: str,
     *,
     hnsw_layers: int = 1,
     segment_count: int = 1,
     force_merge_segment_count: int = 0,
     document_setup: DocumentSetup = DocumentSetup.ALL_SEARCHABLE,
     selective_filter: bool = False,
-    groups: tuple[str, ...] = (),
-    legacy_aliases: tuple[str, ...] = (),
 ) -> EndToEndCase:
     settings = _suite_settings()
     minimum_document_count = _minimum_document_count(
@@ -421,14 +399,15 @@ def _cagra_built_hnsw_case(
         if selective_filter
         else DocumentFilterConfiguration()
     )
-    codec_name = (
-        CAGRA_HNSW_MULTI_LAYER_CODEC
+    codec_factory_class = (
+        CAGRA_BUILT_HNSW_THREE_LAYER_TEST_CODEC_CLASS
         if hnsw_layers == 3
-        else CAGRA_HNSW_BASE_LAYER_CODEC
+        else CAGRA_BUILT_HNSW_BASE_LAYER_TEST_CODEC_CLASS
     )
     scenario = IndexScenario(
         name=selector,
-        codec_name=codec_name,
+        codec_name=HNSW_CODEC,
+        codec_factory_class=codec_factory_class,
         document_count=document_count,
         dimensions=settings.dimensions,
         top_k=settings.top_k,
@@ -443,13 +422,6 @@ def _cagra_built_hnsw_case(
     )
     return EndToEndCase(
         selector=selector,
-        pytest_id=pytest_id,
-        selection_names=_selection_names(
-            selector,
-            ExecutionPath.GPU_CAGRA_BUILT_HNSW,
-            groups,
-            legacy_aliases,
-        ),
         scenario=scenario,
         execution_path=ExecutionPath.GPU_CAGRA_BUILT_HNSW,
         expected_index_file_suffixes=(".vex", ".vem"),
@@ -460,15 +432,12 @@ def _cagra_built_hnsw_case(
 
 def _cagra_search_case(
     selector: str,
-    pytest_id: str,
     *,
     segment_count: int = 1,
     force_merge_segment_count: int = 0,
     document_setup: DocumentSetup = DocumentSetup.ALL_SEARCHABLE,
     search_width: int = 1,
     selective_filter: bool = False,
-    groups: tuple[str, ...] = (),
-    legacy_aliases: tuple[str, ...] = (),
 ) -> EndToEndCase:
     settings = _suite_settings()
     if settings.top_k > 1024:
@@ -520,13 +489,6 @@ def _cagra_search_case(
     )
     return EndToEndCase(
         selector=selector,
-        pytest_id=pytest_id,
-        selection_names=_selection_names(
-            selector,
-            ExecutionPath.GPU_CAGRA_SEARCH,
-            groups,
-            legacy_aliases,
-        ),
         scenario=scenario,
         execution_path=ExecutionPath.GPU_CAGRA_SEARCH,
         expected_index_file_suffixes=(".vcag", ".vemc"),
@@ -537,194 +499,111 @@ def _cagra_search_case(
 SEGMENT_CASES = (
     _cpu_hnsw_case(
         "cpu-hnsw-1-segment",
-        "cpu-hnsw-1-segment",
-        groups=(
-            "execution-paths",
-            "algorithm-matrix",
-            "segment-topologies",
-        ),
-        legacy_aliases=("smoke", "hnsw-cpu", "hnsw-cpu-1seg"),
     ),
     _cpu_hnsw_case(
         "cpu-hnsw-10-segments",
-        "cpu-hnsw-10-segments",
         segment_count=10,
-        groups=("segment-topologies",),
-        legacy_aliases=("hnsw-cpu-10seg",),
     ),
     _cagra_built_hnsw_case(
         "gpu-cagra-built-hnsw-1-segment",
-        "gpu-cagra-built-hnsw-1-segment",
-        groups=(
-            "execution-paths",
-            "algorithm-matrix",
-            "segment-topologies",
-            "hnsw-layer-counts",
-        ),
-        legacy_aliases=(
-            "hnsw-1seg",
-            "cagra-hnsw-1layer",
-            "cagra-hnsw-base",
-            "cagra-hnsw-base-layer",
-        ),
     ),
     _cagra_built_hnsw_case(
         "gpu-cagra-built-hnsw-10-segments",
-        "gpu-cagra-built-hnsw-10-segments",
         segment_count=10,
-        groups=("segment-topologies",),
-        legacy_aliases=("hnsw-10seg",),
     ),
     _cagra_search_case(
         "gpu-cagra-search-10-segments",
-        "gpu-cagra-search-10-segments",
         segment_count=10,
-        groups=("segment-topologies",),
-        legacy_aliases=("cagra-10seg",),
     ),
 )
 
-SINGLE_DOCUMENT_CASES = (
+SINGLE_LIVE_DOCUMENT_CASES = (
     _cagra_search_case(
-        "gpu-cagra-search-single-doc",
-        "gpu-cagra-search-single-doc",
+        "gpu-cagra-search-single-live-doc",
         document_setup=DocumentSetup.SINGLE_LIVE,
-        groups=("single-document",),
     ),
 )
 
 FORCE_MERGE_CASES = (
     _cpu_hnsw_case(
         "cpu-hnsw-10-to-1-force-merge",
-        "cpu-hnsw-10-to-1",
         segment_count=10,
         force_merge_segment_count=1,
-        groups=("force-merges", "segment-topologies"),
-        legacy_aliases=("hnsw-cpu-10seg-force-1",),
     ),
     _cpu_hnsw_case(
         "cpu-hnsw-100-to-10-force-merge",
-        "cpu-hnsw-100-to-10",
         segment_count=100,
         force_merge_segment_count=10,
-        groups=("force-merges", "segment-topologies"),
-        legacy_aliases=("hnsw-cpu-100seg-force-10",),
     ),
     _cagra_built_hnsw_case(
         "gpu-cagra-built-hnsw-10-to-1-force-merge",
-        "gpu-cagra-built-hnsw-10-to-1",
         segment_count=10,
         force_merge_segment_count=1,
-        groups=("force-merges", "segment-topologies"),
-        legacy_aliases=("hnsw-10seg-force-1",),
     ),
     _cagra_built_hnsw_case(
         "gpu-cagra-built-hnsw-100-to-10-force-merge",
-        "gpu-cagra-built-hnsw-100-to-10",
         segment_count=100,
         force_merge_segment_count=10,
-        groups=("force-merges", "segment-topologies"),
-        legacy_aliases=("hnsw-100seg-force-10",),
     ),
     _cagra_search_case(
         "gpu-cagra-search-10-to-1-force-merge",
-        "gpu-cagra-search-10-to-1",
         segment_count=10,
         force_merge_segment_count=1,
-        groups=("force-merges", "segment-topologies"),
-        legacy_aliases=("cagra-10seg-force-1",),
     ),
     _cagra_search_case(
         "gpu-cagra-search-100-to-10-force-merge",
-        "gpu-cagra-search-100-to-10",
         segment_count=100,
         force_merge_segment_count=10,
-        groups=("force-merges", "segment-topologies"),
-        legacy_aliases=("cagra-100seg-force-10",),
     ),
 )
 
 HNSW_LAYER_CASES = (
     _cagra_built_hnsw_case(
         "gpu-cagra-built-hnsw-3-layers",
-        "3-layers",
         hnsw_layers=3,
-        groups=("hnsw-layer-counts",),
-        legacy_aliases=(
-            "cagra-hnsw-3layer",
-            "cagra-hnsw-multilayer",
-            "cagra-hnsw-multi-layer",
-        ),
     ),
 )
 
 CAGRA_SEARCH_WIDTH_CASES = (
     _cagra_search_case(
         "gpu-cagra-search-1-segment",
-        "1-segment-width-1",
-        groups=(
-            "execution-paths",
-            "algorithm-matrix",
-            "segment-topologies",
-            "cagra-search-widths",
-        ),
-        legacy_aliases=(
-            "gpu-cagra-search-width-1",
-            "cagra-1seg",
-        ),
     ),
     _cagra_search_case(
         "gpu-cagra-search-width-16",
-        "16",
         search_width=16,
-        groups=("cagra-search-widths",),
     ),
     _cagra_search_case(
         "gpu-cagra-search-width-32",
-        "32",
         search_width=32,
-        groups=("cagra-search-widths",),
     ),
 )
 
 DELETED_DOCUMENT_CASES = (
     _cagra_search_case(
         "gpu-cagra-search-deleted-documents",
-        "gpu-cagra-search",
         document_setup=DocumentSetup.ONE_DELETED,
-        groups=("deleted-documents",),
     ),
 )
 
 DOCUMENT_FILTER_CASES = (
     _cpu_hnsw_case(
         "cpu-hnsw-selective-filter",
-        "cpu-hnsw-selective-filter",
         selective_filter=True,
-        groups=("document-filter",),
-        legacy_aliases=("cpu-hnsw-document-filter",),
     ),
     _cagra_built_hnsw_case(
         "gpu-cagra-built-hnsw-selective-filter",
-        "gpu-cagra-built-hnsw-selective-filter",
         selective_filter=True,
-        groups=("document-filter",),
-        legacy_aliases=("gpu-cagra-built-hnsw-document-filter",),
     ),
     _cagra_search_case(
         "gpu-cagra-search-selective-filter-10-segments",
-        "gpu-cagra-search-selective-filter-10-segments",
         segment_count=10,
         selective_filter=True,
-        groups=("document-filter",),
-        legacy_aliases=("gpu-cagra-search-document-filter",),
     ),
 )
 
 
 def _case_parameter(case: EndToEndCase) -> object:
-    marker = pytest.mark.pylucene_case(*sorted(case.selection_names))
-    return pytest.param(case, id=case.pytest_id, marks=marker)
+    return pytest.param(case, id=case.selector)
 
 
 def _case_parameters(
@@ -745,6 +624,7 @@ def _service_providers(
 
 
 def test_published_jar_has_expected_lucene_services() -> None:
+    """Verify the published jar exposes every expected Lucene SPI service."""
     cuvs_lucene_jar = find_cuvs_lucene_jar()
     with ZipFile(cuvs_lucene_jar) as archive:
         entries = frozenset(archive.namelist())
@@ -780,6 +660,7 @@ def test_published_jar_has_expected_lucene_services() -> None:
 
 
 def test_published_jar_does_not_bundle_lucene_or_cuvs_java() -> None:
+    """Keep PyLucene's Lucene classes and the base cuVS jar external."""
     cuvs_lucene_jar = find_cuvs_lucene_jar()
     with ZipFile(cuvs_lucene_jar) as archive:
         entries = frozenset(archive.namelist())
@@ -820,6 +701,7 @@ def test_published_jar_does_not_bundle_lucene_or_cuvs_java() -> None:
 
 
 def test_published_jar_excludes_pylucene_test_support() -> None:
+    """Keep the Java test bridge out of the published artifact."""
     cuvs_lucene_jar = find_cuvs_lucene_jar()
     with ZipFile(cuvs_lucene_jar) as archive:
         entries = frozenset(archive.namelist())
@@ -936,8 +818,9 @@ def _assert_index_metadata(case: EndToEndCase, result: IndexRun) -> None:
 
 
 def _assert_execution_path(case: EndToEndCase, result: IndexRun) -> None:
-    observed_writer_path = result.writer_telemetry.get("writerPath")
-    assert observed_writer_path == case.execution_path.expected_writer_path
+    telemetry = result.writer_telemetry
+    assert telemetry.get("configuredPath") == case.execution_path.selector
+    assert telemetry.get("writerClass") == case.execution_path.expected_writer_class
 
     if case.execution_path is ExecutionPath.GPU_CAGRA_SEARCH:
         assert set(result.vector_reader_classes) == {CAGRA_VECTOR_READER_CLASS}
@@ -1131,15 +1014,17 @@ def _run_and_verify(
 def test_search_with_configured_segment_count(
     pylucene_context: PyLuceneContext, case: EndToEndCase
 ) -> None:
+    """Exercise each execution path across configured segment topologies."""
     result, _ = _run_and_verify(case, pylucene_context)
     assert not result.document_ids_without_vectors
     assert not result.deleted_document_ids
 
 
-@pytest.mark.parametrize("case", _case_parameters(SINGLE_DOCUMENT_CASES))
+@pytest.mark.parametrize("case", _case_parameters(SINGLE_LIVE_DOCUMENT_CASES))
 def test_cagra_search_with_single_live_document(
     pylucene_context: PyLuceneContext, case: EndToEndCase
 ) -> None:
+    """Search a warning-free CAGRA index after deleting all but one document."""
     result, _ = _run_and_verify(case, pylucene_context)
     assert result.live_document_count == 1
     assert len(result.searchable_vector_document_ids) == 1
@@ -1154,6 +1039,7 @@ def test_cagra_search_with_single_live_document(
 def test_search_after_force_merge(
     pylucene_context: PyLuceneContext, case: EndToEndCase
 ) -> None:
+    """Verify CPU and GPU search paths after representative force merges."""
     result, _ = _run_and_verify(case, pylucene_context)
     assert not result.document_ids_without_vectors
     assert not result.deleted_document_ids
@@ -1163,6 +1049,7 @@ def test_search_after_force_merge(
 def test_cagra_built_hnsw_has_expected_layer_count(
     pylucene_context: PyLuceneContext, case: EndToEndCase
 ) -> None:
+    """Verify CAGRA-built HNSW persists the requested three layers."""
     result, _ = _run_and_verify(case, pylucene_context)
     assert set(result.hnsw_layer_counts) == {case.expected_hnsw_layers}
 
@@ -1173,6 +1060,7 @@ def test_cagra_built_hnsw_has_expected_layer_count(
 def test_cagra_search_with_configured_search_width(
     pylucene_context: PyLuceneContext, case: EndToEndCase
 ) -> None:
+    """Exercise GPU CAGRA search widths 1, 16, and 32."""
     _run_and_verify(case, pylucene_context)
 
 
@@ -1182,6 +1070,7 @@ def test_cagra_search_with_configured_search_width(
 def test_deleted_documents_are_not_searchable(
     pylucene_context: PyLuceneContext, case: EndToEndCase
 ) -> None:
+    """Verify GPU CAGRA search never returns a deleted vector document."""
     result, _ = _run_and_verify(case, pylucene_context)
     assert len(result.deleted_document_ids) == 1
     assert not result.document_ids_without_vectors
@@ -1197,6 +1086,7 @@ def test_deleted_documents_are_not_searchable(
 def test_vector_search_honors_selective_document_filter(
     pylucene_context: PyLuceneContext, case: EndToEndCase
 ) -> None:
+    """Compare filtered CPU and GPU search results with brute force."""
     result, _ = _run_and_verify(case, pylucene_context)
     observation = result.filtered_query_observation
     assert observation is not None

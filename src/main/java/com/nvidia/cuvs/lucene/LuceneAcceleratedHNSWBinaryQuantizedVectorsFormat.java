@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 package com.nvidia.cuvs.lucene;
@@ -72,7 +72,7 @@ public class LuceneAcceleratedHNSWBinaryQuantizedVectorsFormat extends KnnVector
         if (format == null) {
           format =
               getLuceneProvider(LuceneProvider.LUCENE_102_BINARY_FORMAT_VERSION)
-                  .getLuceneHnswBinaryQuantizedVectorsFormatInstance(
+                  .getLuceneHnswBinaryQuantizedKnnVectorsFormatInstance(
                       acceleratedHNSWParams.getMaxConn(), acceleratedHNSWParams.getBeamWidth());
           cachedFallbackFormat = format;
         }

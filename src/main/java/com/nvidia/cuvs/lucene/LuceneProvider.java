@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 package com.nvidia.cuvs.lucene;
@@ -284,6 +284,7 @@ public class LuceneProvider {
     }
   }
 
+  /** Returns the Lucene 10.2 flat binary-quantized vectors format. */
   public FlatVectorsFormat getLuceneBinaryQuantizedVectorsFormatInstance() throws Exception {
     try {
       Constructor<?> luceneBinaryQuantizedVectorsFormatConstructor =
@@ -297,7 +298,18 @@ public class LuceneProvider {
     }
   }
 
-  public KnnVectorsFormat getLuceneHnswBinaryQuantizedVectorsFormatInstance(
+  /**
+   * Retains the original public spelling for source and binary compatibility.
+   *
+   * @deprecated Use {@link #getLuceneBinaryQuantizedVectorsFormatInstance()}.
+   */
+  @Deprecated(since = "26.10", forRemoval = false)
+  public FlatVectorsFormat getluceneBinaryQuantizedVectorsFormatInstance() throws Exception {
+    return getLuceneBinaryQuantizedVectorsFormatInstance();
+  }
+
+  /** Returns the Lucene 10.2 HNSW binary-quantized vectors format. */
+  public KnnVectorsFormat getLuceneHnswBinaryQuantizedKnnVectorsFormatInstance(
       int maxConn, int beamWidth) throws Exception {
     try {
       Constructor<?> luceneHnswBinaryQuantizedVectorsFormatConstructor =
@@ -310,6 +322,23 @@ public class LuceneProvider {
           "Unable to initialize LuceneHnswBinaryQuantizedVectorsFormat: " + e.getMessage());
       throw e;
     }
+  }
+
+  /**
+   * Retains the original, incorrectly typed JVM method descriptor.
+   *
+   * <p>The Lucene HNSW binary-quantized format is a {@link KnnVectorsFormat}, not a {@link
+   * FlatVectorsFormat}; the former implementation therefore always failed its cast. Use {@link
+   * #getLuceneHnswBinaryQuantizedKnnVectorsFormatInstance(int, int)}.
+   *
+   * @deprecated The original return type cannot represent Lucene's HNSW format.
+   */
+  @Deprecated(since = "26.10", forRemoval = false)
+  public FlatVectorsFormat getLuceneHnswBinaryQuantizedVectorsFormatInstance(
+      int maxConn, int beamWidth) throws Exception {
+    throw new UnsupportedOperationException(
+        "Lucene HNSW binary-quantized vectors require KnnVectorsFormat; use "
+            + "getLuceneHnswBinaryQuantizedKnnVectorsFormatInstance(int, int)");
   }
 
   public FlatVectorsFormat getLuceneScalarQuantizedVectorsFormatInstance() throws Exception {

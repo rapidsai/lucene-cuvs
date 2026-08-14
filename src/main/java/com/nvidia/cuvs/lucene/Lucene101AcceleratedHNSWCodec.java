@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 package com.nvidia.cuvs.lucene;
@@ -55,14 +55,7 @@ public class Lucene101AcceleratedHNSWCodec extends FilterCodec {
     this(NAME, LuceneProvider.getDefaultDelegateCodec(), acceleratedHNSWParams);
   }
 
-  /**
-   * Constructor for subclasses that expose named accelerated HNSW configurations via SPI.
-   *
-   * @param name the codec's name
-   * @param delegate the delegate codec to filter
-   * @param acceleratedHNSWParams instance of {@link AcceleratedHNSWParams}
-   */
-  protected Lucene101AcceleratedHNSWCodec(
+  private Lucene101AcceleratedHNSWCodec(
       String name, Codec delegate, AcceleratedHNSWParams acceleratedHNSWParams) {
     super(name, delegate);
     initializeFormat(acceleratedHNSWParams);

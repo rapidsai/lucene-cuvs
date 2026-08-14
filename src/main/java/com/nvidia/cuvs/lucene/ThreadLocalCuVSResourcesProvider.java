@@ -17,7 +17,6 @@ public class ThreadLocalCuVSResourcesProvider {
 
   private static final Logger log =
       Logger.getLogger(ThreadLocalCuVSResourcesProvider.class.getName());
-  static final String FORCE_CPU_HNSW_FALLBACK_PROPERTY = "cuvs.lucene.forceCpuHnswFallback";
   private static final ThreadLocal<CuVSResources> cuVSResources;
 
   static {
@@ -30,9 +29,6 @@ public class ThreadLocalCuVSResourcesProvider {
    * @return an instance of CuVSResources
    */
   public static CuVSResources getCuVSResourcesInstance() {
-    if (isCpuHnswFallbackForced()) {
-      return null;
-    }
     return cuVSResources.get();
   }
 
@@ -55,8 +51,7 @@ public class ThreadLocalCuVSResourcesProvider {
     try {
       // Resolve configuration before allocating resources so malformed input cannot leak a newly
       // created native handle and pinned host buffer.
-      long poolBytes =
-          resolveWorkspacePoolBytes(System.getProperty(WORKSPACE_POOL_SIZE_PROPERTY));
+      long poolBytes = resolveWorkspacePoolBytes(System.getProperty(WORKSPACE_POOL_SIZE_PROPERTY));
       resources = CuVSResources.create();
       if (poolBytes > 0) {
         resources.setWorkspacePool(poolBytes);
@@ -95,8 +90,7 @@ public class ThreadLocalCuVSResourcesProvider {
     }
 
     if (requestedBytes == 0) return 0;
-    if (requestedBytes < 0
-        || requestedBytes > Long.MAX_VALUE - (RMM_ALIGNMENT_BYTES - 1)) {
+    if (requestedBytes < 0 || requestedBytes > Long.MAX_VALUE - (RMM_ALIGNMENT_BYTES - 1)) {
       warnInvalidWorkspacePoolSize(raw);
       return 0;
     }
@@ -140,7 +134,7 @@ public class ThreadLocalCuVSResourcesProvider {
    * @throws UnsupportedOperationException
    */
   public static void assertIsSupported() throws UnsupportedOperationException {
-    if (isCpuHnswFallbackForced() || cuVSResources.get() == null) {
+    if (cuVSResources.get() == null) {
       throw new UnsupportedOperationException("cuVS is not supported");
     }
   }
@@ -151,10 +145,6 @@ public class ThreadLocalCuVSResourcesProvider {
    * @return true if cuVS is supported else false
    */
   public static boolean isSupported() {
-    return !isCpuHnswFallbackForced() && cuVSResources.get() != null;
-  }
-
-  static boolean isCpuHnswFallbackForced() {
-    return Boolean.getBoolean(FORCE_CPU_HNSW_FALLBACK_PROPERTY);
+    return cuVSResources.get() != null;
   }
 }

@@ -9,14 +9,19 @@ import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Map;
+import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.codecs.KnnVectorsReader;
+import org.apache.lucene.codecs.KnnVectorsWriter;
 import org.apache.lucene.codecs.hnsw.HnswGraphProvider;
+import org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsFormat;
 import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
 import org.apache.lucene.index.CodecReader;
 import org.apache.lucene.index.FilterLeafReader;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.QueryTimeout;
+import org.apache.lucene.index.SegmentReadState;
+import org.apache.lucene.index.SegmentWriteState;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.KnnFloatVectorQuery;
@@ -44,20 +49,162 @@ public final class PyLuceneTestSupport {
 
   private static final int CAGRA_GRAPH_DEGREE = 32;
   private static final int CAGRA_INTERMEDIATE_GRAPH_DEGREE = 64;
+  private static final int CPU_HNSW_MAX_CONN = 32;
+  private static final int CPU_HNSW_BEAM_WIDTH = 32;
 
   private PyLuceneTestSupport() {}
+
+  /** Stock Lucene CPU HNSW codec with max connections 32. */
+  public static final class CpuHnswCodec extends Lucene101AcceleratedHNSWCodec {
+
+    public CpuHnswCodec() throws Exception {
+      super();
+      setKnnFormat(
+          diagnosticFormat(
+              new Lucene99HnswVectorsFormat(CPU_HNSW_MAX_CONN, CPU_HNSW_BEAM_WIDTH),
+              "configuredPath=cpu-hnsw;hnswM=" + CPU_HNSW_MAX_CONN));
+    }
+  }
 
   /** CAGRA codec with graph degree 32 and intermediate graph degree 64. */
   public static final class CagraSearchCodec extends CuVS2510GPUSearchCodec {
 
     public CagraSearchCodec() throws Exception {
-      super(
-          new GPUSearchParams.Builder()
-              .withStrategy(GPUSearchParams.Strategy.CUSTOM)
-              .withCagraGraphBuildAlgo(CagraGraphBuildAlgo.NN_DESCENT)
-              .withGraphDegree(CAGRA_GRAPH_DEGREE)
-              .withIntermediateGraphDegree(CAGRA_INTERMEDIATE_GRAPH_DEGREE)
-              .build());
+      this(cagraSearchParams());
+    }
+
+    private CagraSearchCodec(GPUSearchParams params) throws Exception {
+      super(params);
+      setKnnFormat(
+          diagnosticFormat(
+              super.knnVectorsFormat(),
+              "configuredPath=gpu-cagra-search;" + cagraDiagnostics(params)));
+    }
+  }
+
+  /** CAGRA-built HNSW codec that persists only the base layer. */
+  public static final class CagraBuiltHnswBaseLayerCodec extends Lucene101AcceleratedHNSWCodec {
+
+    public CagraBuiltHnswBaseLayerCodec() throws Exception {
+      this(cagraBuiltHnswParams(1));
+    }
+
+    private CagraBuiltHnswBaseLayerCodec(AcceleratedHNSWParams params) throws Exception {
+      super(params);
+      setKnnFormat(
+          diagnosticFormat(
+              super.knnVectorsFormat(),
+              "configuredPath=gpu-cagra-built-hnsw;" + hnswDiagnostics(params)));
+    }
+  }
+
+  /** CAGRA-built HNSW codec that persists exactly three layers. */
+  public static final class CagraBuiltHnswThreeLayerCodec extends Lucene101AcceleratedHNSWCodec {
+
+    public CagraBuiltHnswThreeLayerCodec() throws Exception {
+      this(cagraBuiltHnswParams(3));
+    }
+
+    private CagraBuiltHnswThreeLayerCodec(AcceleratedHNSWParams params) throws Exception {
+      super(params);
+      setKnnFormat(
+          diagnosticFormat(
+              super.knnVectorsFormat(),
+              "configuredPath=gpu-cagra-built-hnsw;" + hnswDiagnostics(params)));
+    }
+  }
+
+  private static GPUSearchParams cagraSearchParams() {
+    return new GPUSearchParams.Builder()
+        .withStrategy(GPUSearchParams.Strategy.CUSTOM)
+        .withCagraGraphBuildAlgo(CagraGraphBuildAlgo.NN_DESCENT)
+        .withGraphDegree(CAGRA_GRAPH_DEGREE)
+        .withIntermediateGraphDegree(CAGRA_INTERMEDIATE_GRAPH_DEGREE)
+        .build();
+  }
+
+  private static AcceleratedHNSWParams cagraBuiltHnswParams(int hnswLayers) {
+    return new AcceleratedHNSWParams.Builder()
+        .withStrategy(AcceleratedHNSWParams.Strategy.CUSTOM)
+        .withCagraGraphBuildAlgo(CagraGraphBuildAlgo.NN_DESCENT)
+        .withGraphDegree(CAGRA_GRAPH_DEGREE)
+        .withIntermediateGraphDegree(CAGRA_INTERMEDIATE_GRAPH_DEGREE)
+        .withHNSWLayer(hnswLayers)
+        .build();
+  }
+
+  private static String cagraDiagnostics(GPUSearchParams params) {
+    return "cagraStrategy="
+        + params.getStrategy().name()
+        + ";cagraGraphBuildAlgo="
+        + params.getCagraGraphBuildAlgo().name()
+        + ";cagraGraphDegree="
+        + params.getGraphdegree()
+        + ";cagraIntermediateGraphDegree="
+        + params.getIntermediateGraphDegree();
+  }
+
+  private static String hnswDiagnostics(AcceleratedHNSWParams params) {
+    return "hnswLayers=" + params.getHnswLayers() + ";" + cagraDiagnostics(params);
+  }
+
+  private static String cagraDiagnostics(AcceleratedHNSWParams params) {
+    return "cagraStrategy="
+        + params.getStrategy().name()
+        + ";cagraGraphBuildAlgo="
+        + params.getCagraGraphBuildAlgo().name()
+        + ";cagraGraphDegree="
+        + params.getGraphdegree()
+        + ";cagraIntermediateGraphDegree="
+        + params.getIntermediateGraphDegree();
+  }
+
+  private static KnnVectorsFormat diagnosticFormat(
+      KnnVectorsFormat delegate, String configuration) {
+    return new DiagnosticKnnVectorsFormat(delegate, configuration);
+  }
+
+  /** Records the concrete writer selected by a test codec without probing or owning resources. */
+  private static final class DiagnosticKnnVectorsFormat extends KnnVectorsFormat {
+
+    private static final String NOT_SELECTED = "not-selected";
+
+    private final KnnVectorsFormat delegate;
+    private final String configuration;
+    private volatile String writerClass = NOT_SELECTED;
+
+    private DiagnosticKnnVectorsFormat(KnnVectorsFormat delegate, String configuration) {
+      super(delegate.getName());
+      this.delegate = delegate;
+      this.configuration = configuration;
+    }
+
+    @Override
+    public KnnVectorsWriter fieldsWriter(SegmentWriteState state) throws IOException {
+      KnnVectorsWriter writer = delegate.fieldsWriter(state);
+      String selectedClass = writer.getClass().getName();
+      String previousClass = writerClass;
+      if (!NOT_SELECTED.equals(previousClass) && !previousClass.equals(selectedClass)) {
+        throw new AssertionError(
+            "Vector writer selection changed from " + previousClass + " to " + selectedClass);
+      }
+      writerClass = selectedClass;
+      return writer;
+    }
+
+    @Override
+    public KnnVectorsReader fieldsReader(SegmentReadState state) throws IOException {
+      return delegate.fieldsReader(state);
+    }
+
+    @Override
+    public int getMaxDimensions(String fieldName) {
+      return delegate.getMaxDimensions(fieldName);
+    }
+
+    @Override
+    public String toString() {
+      return getName() + "(" + configuration + ";writerClass=" + writerClass + ")";
     }
   }
 

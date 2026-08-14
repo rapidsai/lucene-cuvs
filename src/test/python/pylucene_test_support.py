@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import struct
 import tempfile
+import xml.etree.ElementTree as ElementTree
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -24,6 +25,17 @@ FILTER_EXCLUDED_VALUE = "excluded"
 CAGRA_TEST_CODEC_CLASS = (
     "com.nvidia.cuvs.lucene.PyLuceneTestSupport$CagraSearchCodec"
 )
+CPU_HNSW_TEST_CODEC_CLASS = (
+    "com.nvidia.cuvs.lucene.PyLuceneTestSupport$CpuHnswCodec"
+)
+CAGRA_BUILT_HNSW_BASE_LAYER_TEST_CODEC_CLASS = (
+    "com.nvidia.cuvs.lucene."
+    "PyLuceneTestSupport$CagraBuiltHnswBaseLayerCodec"
+)
+CAGRA_BUILT_HNSW_THREE_LAYER_TEST_CODEC_CLASS = (
+    "com.nvidia.cuvs.lucene."
+    "PyLuceneTestSupport$CagraBuiltHnswThreeLayerCodec"
+)
 CAGRA_TEST_QUERY_CLASS = (
     "com.nvidia.cuvs.lucene.PyLuceneTestSupport$CagraSearchQuery"
 )
@@ -32,7 +44,6 @@ HNSW_GRAPH_VERIFYING_QUERY_CLASS = (
 )
 CAGRA_VECTOR_READER_CLASS = "com.nvidia.cuvs.lucene.CuVS2510GPUVectorsReader"
 
-FORCE_CPU_HNSW_FALLBACK_PROPERTY = "cuvs.lucene.forceCpuHnswFallback"
 QUERY_PROPERTIES = {
     "field": "cuvs.lucene.pylucene.query.field",
     "target": "cuvs.lucene.pylucene.query.target",
@@ -62,7 +73,6 @@ class IndexScenario:
     additional_query_document_ids: tuple[int, ...] = ()
     document_ids_accepted_by_filter: frozenset[int] = frozenset()
     filter_query_document_id: int | None = None
-    force_cpu_hnsw: bool = False
     codec_factory_class: str = ""
     use_cagra_search_query: bool = False
     expected_hnsw_m: int = 0
@@ -174,22 +184,34 @@ def find_cuvs_java_jar() -> Path:
             "CUVS_LUCENE_CUVS_JAVA_JAR to the base cuvs-java jar."
         )
 
-    def is_base_jar(jar: Path) -> bool:
-        return (
-            jar.name.startswith("cuvs-java-")
-            and jar.name.endswith(".jar")
-            and "-x86_64-" not in jar.name
-            and "-sources" not in jar.name
-            and "-javadoc" not in jar.name
-        )
-
-    jars = sorted(jar for jar in m2_repo.glob("*/*.jar") if is_base_jar(jar))
-    if not jars:
+    required_version = _maven_dependency_version(
+        "com.nvidia.cuvs", "cuvs-java"
+    )
+    jar = m2_repo / required_version / f"cuvs-java-{required_version}.jar"
+    if not jar.is_file():
         raise FileNotFoundError(
-            "Unable to find the base cuvs-java jar in ~/.m2. Set "
-            "CUVS_LUCENE_CUVS_JAVA_JAR explicitly."
+            f"Unable to find the POM-matching base cuvs-java {required_version} "
+            f"jar at {jar}. Set CUVS_LUCENE_CUVS_JAVA_JAR explicitly."
         )
-    return jars[-1].resolve()
+    return jar.resolve()
+
+
+def _maven_dependency_version(group_id: str, artifact_id: str) -> str:
+    namespace = {"maven": "http://maven.apache.org/POM/4.0.0"}
+    root = ElementTree.parse(REPO_ROOT / "pom.xml").getroot()
+    for dependency in root.findall(".//maven:dependency", namespace):
+        dependency_group = dependency.findtext("maven:groupId", namespaces=namespace)
+        dependency_artifact = dependency.findtext(
+            "maven:artifactId", namespaces=namespace
+        )
+        if dependency_group == group_id and dependency_artifact == artifact_id:
+            version = dependency.findtext("maven:version", namespaces=namespace)
+            if version and not version.startswith("${"):
+                return version
+            raise RuntimeError(
+                f"Dependency {group_id}:{artifact_id} has no literal version in pom.xml"
+            )
+    raise RuntimeError(f"Dependency {group_id}:{artifact_id} is absent from pom.xml")
 
 
 def find_test_classes() -> Path:
@@ -201,7 +223,10 @@ def find_test_classes() -> Path:
     ).resolve()
     required_classes = (
         "PyLuceneTestSupport.class",
+        "PyLuceneTestSupport$CpuHnswCodec.class",
         "PyLuceneTestSupport$CagraSearchCodec.class",
+        "PyLuceneTestSupport$CagraBuiltHnswBaseLayerCodec.class",
+        "PyLuceneTestSupport$CagraBuiltHnswThreeLayerCodec.class",
         "PyLuceneTestSupport$CagraSearchQuery.class",
         "PyLuceneTestSupport$HnswGraphVerifyingQuery.class",
     )
@@ -279,7 +304,10 @@ def initialize_pylucene_context(
 
     # Resolve classpath failures before constructing codecs or indexes.
     Class.forName("com.nvidia.cuvs.spi.JDKProvider")
+    Class.forName(CPU_HNSW_TEST_CODEC_CLASS)
     Class.forName(CAGRA_TEST_CODEC_CLASS)
+    Class.forName(CAGRA_BUILT_HNSW_BASE_LAYER_TEST_CODEC_CLASS)
+    Class.forName(CAGRA_BUILT_HNSW_THREE_LAYER_TEST_CODEC_CLASS)
     Class.forName(CAGRA_TEST_QUERY_CLASS)
     Class.forName(HNSW_GRAPH_VERIFYING_QUERY_CLASS)
 
@@ -364,20 +392,6 @@ def _temporary_system_properties(
                 system_class.clearProperty(name)
             else:
                 system_class.setProperty(name, value)
-
-
-@contextmanager
-def _cpu_hnsw_fallback(
-    scenario: IndexScenario, system_class: Any
-) -> Iterator[None]:
-    if not scenario.force_cpu_hnsw:
-        yield
-        return
-
-    with _temporary_system_properties(
-        system_class, {FORCE_CPU_HNSW_FALLBACK_PROPERTY: "true"}
-    ):
-        yield
 
 
 def _new_cagra_search_query(
@@ -810,7 +824,6 @@ def run_index_scenario(
     )
 
     with ExitStack() as stack:
-        stack.enter_context(_cpu_hnsw_fallback(scenario, context.system_class))
         index_path = stack.enter_context(
             tempfile.TemporaryDirectory(
                 prefix=f"cuvs-lucene-pylucene-{scenario.name}-"
