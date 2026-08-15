@@ -1,5 +1,8 @@
 # Contributing
 
+> [!IMPORTANT]
+> Active development of this project has moved to the [cuVS](https://github.com/NVIDIA/cuvs) repository. Please open new issues and pull requests against `cuvs-lucene` there instead of in this repository. See [NVIDIA/cuvs#2353](https://github.com/NVIDIA/cuvs/pull/2353) for more information.
+
 If you are interested in contributing to Lucene-cuVS, your contributions will fall
 into three categories:
 1. You want to report a bug, feature request, or documentation issue
