@@ -259,8 +259,25 @@ def to_java_float_array(jarray: Any, values: tuple[float, ...]) -> Any:
     return jarray("float")(values)
 
 
+def validate_pylucene_version(
+    actual_version: str, expected_version: str
+) -> None:
+    if actual_version != expected_version:
+        raise RuntimeError(
+            "PyLucene must be generated against the same Lucene version as "
+            f"cuvs-lucene: expected {expected_version}, found {actual_version}. "
+            f"Activate a PyLucene build generated against Lucene {expected_version} "
+            "before initializing the JVM."
+        )
+
+
 def _init_vm(cuvs_java_jar: Path, cuvs_lucene_jar: Path, test_classes: Path) -> Any:
     import lucene
+
+    validate_pylucene_version(
+        str(getattr(lucene, "VERSION", "<missing>")),
+        _maven_dependency_version("org.apache.lucene", "lucene-core"),
+    )
 
     java_library_path = os.environ.get("JAVA_LIBRARY_PATH") or os.environ.get(
         "LD_LIBRARY_PATH"

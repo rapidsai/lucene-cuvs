@@ -34,6 +34,7 @@ from pylucene_test_support import (
     initialize_pylucene_context,
     run_index_scenario,
     segment_document_id_ranges,
+    validate_pylucene_version,
 )
 
 # Python 3.14 reports one deprecation per JCC-generated PyLucene builtin type.
@@ -711,6 +712,15 @@ def test_published_jar_excludes_pylucene_test_support() -> None:
         entry for entry in entries if entry.startswith(test_support_prefix)
     )
     assert not published_test_classes
+
+
+def test_pylucene_version_must_match_cuvs_lucene() -> None:
+    validate_pylucene_version("10.2.0", "10.2.0")
+    with pytest.raises(
+        RuntimeError,
+        match=r"expected 10\.2\.0, found 10\.0\.0",
+    ):
+        validate_pylucene_version("10.0.0", "10.2.0")
 
 
 @pytest.fixture(scope="session")

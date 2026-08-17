@@ -25,7 +25,7 @@ public class LuceneAcceleratedHNSWBinaryQuantizedCodec extends FilterCodec {
   private KnnVectorsFormat format;
 
   public LuceneAcceleratedHNSWBinaryQuantizedCodec() throws Exception {
-    this(NAME, LuceneProvider.getDefaultDelegateCodec());
+    this(NAME, LuceneProvider.getCodec("101"));
   }
 
   public LuceneAcceleratedHNSWBinaryQuantizedCodec(String name, Codec delegate) {
@@ -35,7 +35,7 @@ public class LuceneAcceleratedHNSWBinaryQuantizedCodec extends FilterCodec {
 
   public LuceneAcceleratedHNSWBinaryQuantizedCodec(AcceleratedHNSWParams acceleratedHNSWParams)
       throws Exception {
-    super(NAME, LuceneProvider.getDefaultDelegateCodec());
+    super(NAME, LuceneProvider.getCodec("101"));
     initializeFormat(acceleratedHNSWParams);
   }
 

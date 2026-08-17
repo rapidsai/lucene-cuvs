@@ -31,7 +31,7 @@ public class CuVS2510GPUSearchCodec extends FilterCodec {
   public CuVS2510GPUSearchCodec() throws Exception {
     this(
         NAME,
-        LuceneProvider.getDefaultDelegateCodec(),
+        LuceneProvider.getCodec("101"),
         new GPUSearchParams.Builder().build(),
         FilterBitsetCacheConfig.DEFAULT);
   }
@@ -55,7 +55,7 @@ public class CuVS2510GPUSearchCodec extends FilterCodec {
    * @throws Exception Exception raised when initializing the codec
    */
   public CuVS2510GPUSearchCodec(GPUSearchParams params) throws Exception {
-    this(NAME, LuceneProvider.getDefaultDelegateCodec(), params, FilterBitsetCacheConfig.DEFAULT);
+    this(NAME, LuceneProvider.getCodec("101"), params, FilterBitsetCacheConfig.DEFAULT);
   }
 
   /**
@@ -67,7 +67,7 @@ public class CuVS2510GPUSearchCodec extends FilterCodec {
    */
   public CuVS2510GPUSearchCodec(GPUSearchParams params, FilterBitsetCacheConfig filterCacheConfig)
       throws Exception {
-    this(NAME, LuceneProvider.getDefaultDelegateCodec(), params, filterCacheConfig);
+    this(NAME, LuceneProvider.getCodec("101"), params, filterCacheConfig);
   }
 
   /**

@@ -8,7 +8,6 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,9 +36,6 @@ public class LuceneProvider {
   static final Logger log = Logger.getLogger(LuceneProvider.class.getName());
   static final String LUCENE_99_FORMAT_VERSION = "99";
   static final String LUCENE_102_BINARY_FORMAT_VERSION = "102";
-
-  private static final List<String> SUPPORTED_DELEGATE_CODEC_VERSIONS =
-      List.of("101", LUCENE_99_FORMAT_VERSION);
 
   private static final String BASE = "org.apache.lucene.";
   private static String codecs = "codecs.lucene<version>.";
@@ -192,26 +188,6 @@ public class LuceneProvider {
     return (Codec) codecClassConstructor.newInstance();
   }
 
-  public static Codec getDefaultDelegateCodec() {
-    List<String> failures = new ArrayList<>();
-    for (String version : SUPPORTED_DELEGATE_CODEC_VERSIONS) {
-      try {
-        return getCodec(version);
-      } catch (ReflectiveOperationException
-          | SecurityException
-          | IllegalArgumentException
-          | LinkageError e) {
-        failures.add("Lucene" + version + ": " + e.getMessage());
-        log.log(Level.FINE, "Unable to load Lucene" + version + "Codec", e);
-      }
-    }
-    throw new IllegalStateException(
-        "Unable to load a supported Lucene delegate codec. Tried "
-            + SUPPORTED_DELEGATE_CODEC_VERSIONS
-            + ". Failures: "
-            + failures);
-  }
-
   public FlatVectorsFormat getLuceneFlatVectorsFormatInstance(FlatVectorsScorer scorer)
       throws Exception {
     try {
@@ -354,18 +330,43 @@ public class LuceneProvider {
     }
   }
 
-  public FlatVectorsFormat getLuceneHnswScalarQuantizedVectorsFormatInstance(
-      int beamWidth, int maxConn) throws Exception {
+  /**
+   * Returns Lucene's HNSW scalar-quantized vectors format.
+   *
+   * @param maxConn maximum number of connections per graph node
+   * @param beamWidth number of candidate neighbors tracked while building the graph
+   * @return the configured scalar-quantized HNSW format
+   * @throws Exception if the Lucene format cannot be constructed
+   */
+  public KnnVectorsFormat getLuceneHnswScalarQuantizedKnnVectorsFormatInstance(
+      int maxConn, int beamWidth) throws Exception {
     try {
       Constructor<?> luceneHnswScalarQuantizedVectorsFormatConstructor =
           hnswScalarQuantizedVectorsFormat.getConstructor(Integer.TYPE, Integer.TYPE);
-      return (FlatVectorsFormat)
-          luceneHnswScalarQuantizedVectorsFormatConstructor.newInstance(beamWidth, maxConn);
+      return (KnnVectorsFormat)
+          luceneHnswScalarQuantizedVectorsFormatConstructor.newInstance(maxConn, beamWidth);
     } catch (Exception e) {
       log.log(
           Level.SEVERE,
           "Unable to initialize LuceneHnswScalarQuantizedVectorsFormat: " + e.getMessage());
       throw e;
     }
+  }
+
+  /**
+   * Retains the original, incorrectly typed JVM method descriptor.
+   *
+   * <p>The Lucene HNSW scalar-quantized format is a {@link KnnVectorsFormat}, not a {@link
+   * FlatVectorsFormat}; the former implementation therefore always failed its cast. Use {@link
+   * #getLuceneHnswScalarQuantizedKnnVectorsFormatInstance(int, int)}.
+   *
+   * @deprecated The original return type cannot represent Lucene's HNSW format.
+   */
+  @Deprecated(since = "26.10", forRemoval = false)
+  public FlatVectorsFormat getLuceneHnswScalarQuantizedVectorsFormatInstance(
+      int beamWidth, int maxConn) throws Exception {
+    throw new UnsupportedOperationException(
+        "Lucene HNSW scalar-quantized vectors require KnnVectorsFormat; use "
+            + "getLuceneHnswScalarQuantizedKnnVectorsFormatInstance(int, int)");
   }
 }
